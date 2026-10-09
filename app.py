@@ -237,16 +237,16 @@ def generate_pdf_report(
 # ==========================================
 try:
   SUPABASE_URL = st.secrets.get(
-      "SUPABASE_URL", "https://votre-projet.supabase.co"
+      "SUPABASE_URL", "https://ibiejnzafnszsopqvuwr.supabase.co"
   )
   SUPABASE_KEY = st.secrets.get(
-      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImliaWVqbnphZm5zenNvcHF2dXdyIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MTU2MTExOCwiZXhwIjoyMTA3MTM3MTE4fQ.ZDJ7bPbO0IFI80VkwJqv4nKEdfhrC5vWd1Te3tFYrPI"
+     "SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImliaWVqbnphZm5zenNvcHF2dXdyIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MTU2MTExOCwiZXhwIjoyMTA3MTM3MTE4fQ.ZDJ7bPbO0IFI80VkwJqv4nKEdfhrC5vWd1Te3tFYrPI"
   )
   # Code partagé exigé par la politique RLS sur suivi_betonnage (voir le SQL
   # fourni pour la page hors-ligne). L'app principale doit envoyer le même
   # en-tête que offline_betonnage.html, sinon ses propres insertions seraient
   # bloquées par cette même règle de sécurité.
-  CODE_ACCES_TERRAIN = st.secrets.get("CODE_ACCES_TERRAIN", "CHANGEZ_MOI_2026")
+  CODE_ACCES_TERRAIN = st.secrets.get("CODE_ACCES_TERRAIN", "lpee260")
 
   # Création du client SANS argument supplémentaire (comme avant) : c'est le
   # passage d'un ClientOptions à create_client() qui faisait planter la
