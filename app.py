@@ -974,6 +974,9 @@ elif page == "Gestion Utilisateurs" and current_role == "admin":
 
 elif page == "Chantiers" and current_role in projets_config.ROLES_CREATEURS_PROJET:
   st.title("🏗️ Mes Chantiers")
+  _flash = st.session_state.pop("flash_chantier", None)
+  if _flash:
+    st.success(_flash)
   _reg = projets_config.get_projets()
   _user = st.session_state["user"]
   _mes = projets_config.liste_projets_utilisateur(_user)
@@ -1022,11 +1025,10 @@ elif page == "Chantiers" and current_role in projets_config.ROLES_CREATEURS_PROJ
     dossier_ch = st.text_input("N° de dossier", placeholder="ex : 2026/0123")
     submit_ch = st.form_submit_button("Créer le chantier", type="primary")
     if submit_ch:
-      _u = st.session_state["users_db"].get(current_username)
-      if current_role != "admin" and not _u:
+      if current_role != "admin" and not projets_config.compte_en_base(supabase, current_username):
         st.error(
-            "❌ Votre compte n'est pas enregistré en base : un compte nommé est"
-            " nécessaire pour créer un chantier."
+            "❌ Votre compte n'est pas enregistré dans la table app_users : un"
+            " compte nommé est nécessaire pour créer un chantier."
         )
       else:
         ok, resultat = projets_config.creer_projet(
@@ -1036,22 +1038,25 @@ elif page == "Chantiers" and current_role in projets_config.ROLES_CREATEURS_PROJ
           st.error(f"❌ {resultat}")
         else:
           nouveau_pid = resultat
+          reprise = st.session_state.pop("_creation_reprise", False)
           if current_role != "admin":
-            # Le créateur reçoit automatiquement l'accès à son nouveau chantier
-            projets_maj = list(_u.get("projets_autorises", [])) + [nouveau_pid]
-            ok_u, err_u = save_user_db(
-                current_username, _u["password"], _u["role"], _u["can_edit"], projets_maj
-            )
+            ok_u, err_u = projets_config.attribuer_acces(supabase, current_username, nouveau_pid)
             if not ok_u:
               st.error(
-                  f"⚠️ Chantier créé mais accès non attribué : {err_u}."
-                  " Contactez un administrateur."
+                  f"⚠️ Chantier créé mais l'accès n'a pas pu être enregistré : {err_u}"
               )
               st.stop()
             st.session_state["users_db"] = load_users()
-            st.session_state["user"]["projets_autorises"] = projets_maj
+            _acces = st.session_state["user"].get("projets_autorises", [])
+            if nouveau_pid not in _acces:
+              st.session_state["user"]["projets_autorises"] = _acces + [nouveau_pid]
           st.session_state["projet_actif"] = nouveau_pid
-          st.success(f"✅ Chantier « {nom_ch.strip()} » créé et sélectionné.")
+          st.session_state["_projet_a_selectionner"] = nouveau_pid
+          st.session_state["flash_chantier"] = (
+              f"✅ Ce chantier existait déjà à votre nom : il est de nouveau rattaché à votre compte et sélectionné."
+              if reprise else
+              f"✅ Chantier « {nom_ch.strip()} » créé et sélectionné."
+          )
           st.rerun()
 
   # ---------------- Modification ----------------
@@ -1093,7 +1098,7 @@ elif page == "Chantiers" and current_role in projets_config.ROLES_CREATEURS_PROJ
             )
           except Exception:
             pass
-          st.success(f"✅ {msg_m}")
+          st.session_state["flash_chantier"] = f"✅ {msg_m}"
           st.rerun()
         else:
           st.error(f"❌ {msg_m}")
@@ -1149,7 +1154,7 @@ elif page == "Chantiers" and current_role in projets_config.ROLES_CREATEURS_PROJ
         st.session_state["user"]["projets_autorises"] = [
             p for p in st.session_state["user"].get("projets_autorises", []) if p != pid_del
         ]
-        st.success(f"✅ {msg_d}")
+        st.session_state["flash_chantier"] = f"✅ {msg_d}"
         st.rerun()
       else:
         st.error(f"❌ {msg_d}")
