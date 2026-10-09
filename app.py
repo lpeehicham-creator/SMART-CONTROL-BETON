@@ -246,7 +246,7 @@ try:
   # fourni pour la page hors-ligne). L'app principale doit envoyer le même
   # en-tête que offline_betonnage.html, sinon ses propres insertions seraient
   # bloquées par cette même règle de sécurité.
-  CODE_ACCES_TERRAIN = st.secrets.get("CODE_ACCES_TERRAIN", "CHANGEZ_MOI_2026")
+  CODE_ACCES_TERRAIN = st.secrets.get("CODE_ACCES_TERRAIN", "lpee260")
 
   # Création du client SANS argument supplémentaire (comme avant) : c'est le
   # passage d'un ClientOptions à create_client() qui faisait planter la
