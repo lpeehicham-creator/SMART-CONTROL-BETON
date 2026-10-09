@@ -79,7 +79,9 @@ def show(supabase):
         quantite_m3 = st.number_input("Quantité (m³)", min_value=0.0, value=8.0, step=0.5, key="saisie_qte")
         
     with col2:
-        client = st.text_input("Client", value="TGCC", disabled=True, key="saisie_client")
+        # Client = client du projet actif (clé liée au projet : sans ça, Streamlit
+        # garde l'ancienne valeur affichée quand on change de chantier)
+        client = st.text_input("Client", value=projets_config.client_projet(projet_id_actif), disabled=True, key=f"saisie_client_{projet_id_actif}")
         
         # Saisie des heures
         heure_fin = st.time_input("Heure de fin de production", value=datetime.strptime("08:00", "%H:%M").time(), key="saisie_h_fin")
