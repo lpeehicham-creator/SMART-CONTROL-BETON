@@ -379,7 +379,7 @@ def show(supabase):
                                         anciennes_valeurs_beton = {
                                             k: selected_item.get(k) for k in nouvelles_valeurs_beton
                                         }
-                                        supabase.table("suivi_betonnage").update(nouvelles_valeurs_beton).eq("id", rec_id).execute()
+                                        supabase.table("suivi_betonnage").update(nouvelles_valeurs_beton).eq("id", rec_id).eq("projet_id", projet_id_actif).execute()
                                         enregistrer_modification(
                                             supabase,
                                             table_concernee="suivi_betonnage",
@@ -408,7 +408,7 @@ def show(supabase):
                                     anciennes_valeurs={k: v for k, v in selected_item.items() if k != "id"},
                                     commentaire="Suppression définitive de l'enregistrement",
                                 )
-                                supabase.table("suivi_betonnage").delete().eq("id", rec_id).execute()
+                                supabase.table("suivi_betonnage").delete().eq("id", rec_id).eq("projet_id", projet_id_actif).execute()
                                 st.success("Enregistrement supprimé avec succès.")
                                 st.rerun()
                             except Exception as e:
