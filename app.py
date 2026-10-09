@@ -240,13 +240,13 @@ try:
       "SUPABASE_URL", "https://votre-projet.supabase.co"
   )
   SUPABASE_KEY = st.secrets.get(
-      "SUPABASE_KEY", "sb_publishable_GjbxcCH5G-UY1TPfzizcyw_Rud4NGfM"
+      "SUPABASE_KEY", "sb_publishable_m8g5mocsCDgk3JpS1lpuCQ_3wOPyet1"
   )
   # Code partagé exigé par la politique RLS sur suivi_betonnage (voir le SQL
   # fourni pour la page hors-ligne). L'app principale doit envoyer le même
   # en-tête que offline_betonnage.html, sinon ses propres insertions seraient
   # bloquées par cette même règle de sécurité.
-  CODE_ACCES_TERRAIN = st.secrets.get("CODE_ACCES_TERRAIN", "lpee260")
+  CODE_ACCES_TERRAIN = st.secrets.get("CODE_ACCES_TERRAIN", "CHANGEZ_MOI_2026")
 
   # Création du client SANS argument supplémentaire (comme avant) : c'est le
   # passage d'un ClientOptions à create_client() qui faisait planter la
@@ -405,6 +405,14 @@ if st.session_state["user"] is None:
         st.session_state["role"] = remembered_role
         st.session_state["can_edit"] = remembered_can_edit
         st.session_state["users_db"] = load_users()
+        # Le cookie peut dater de plusieurs heures : on reprend rôle et
+        # projets autorisés depuis la base (nouveau chantier créé, accès
+        # retiré...) pour qu'ils soient toujours à jour.
+        _rec = st.session_state["users_db"].get(remembered_user)
+        if _rec:
+          st.session_state["user"]["role"] = _rec["role"]
+          st.session_state["user"]["projets_autorises"] = _rec.get("projets_autorises", [])
+          st.session_state["role"] = _rec["role"]
     except (ValueError, TypeError, AttributeError, KeyError):
       pass
 
@@ -488,7 +496,7 @@ if st.session_state["user"] is None:
           # L'admin voit tous les projets (cf. projets_config.liste_projets_utilisateur) :
           # la liste explicite n'est donc pas nécessaire ici, mais on la
           # renseigne quand même pour la cohérence du jeton signé.
-          _connecter_et_memoriser(username, "admin", True, list(projets_config.PROJETS.keys()))
+          _connecter_et_memoriser(username, "admin", True, list(projets_config.charger_projets(supabase).keys()))
         elif password_input == "ctr2026":
           username = username_input if username_input else "USER"
           # Mot de passe "maître" générique historique : par prudence, il ne
@@ -499,6 +507,9 @@ if st.session_state["user"] is None:
         else:
           st.error("❌ Nom d'utilisateur ou mot de passe incorrect.")
   st.stop()
+
+# Registre des chantiers (table Supabase `projets`), chargé une fois par session
+projets_config.charger_projets(supabase)
 
 # Synchronisation du statut d'édition
 current_username = st.session_state["user"]["username"]
@@ -544,7 +555,18 @@ with st.sidebar:
 
   projets_config.afficher_selecteur_projet(st.session_state["user"])
 
-  if current_role in ["laboratoire", "technicien"]:
+  if current_role == "responsable_chantier":
+    st.info("Rôle : **RESPONSABLE DE CHANTIER**")
+    st.markdown("---")
+    available_pages = [
+        "Accueil",
+        "Chantiers",
+        "Suivi Contrôle Béton",
+        "Historique Complet & PVs",
+        "Suivi de Bétonnage",
+        "Synthèse Béton",
+    ]
+  elif current_role in ["laboratoire", "technicien"]:
     if current_username == "HANINE":
       st.info("Rôle : **RESPONSABLE DE DOSSIER**")
     elif current_username == "AMINA":
@@ -568,6 +590,7 @@ with st.sidebar:
     st.markdown("---")
     available_pages = [
         "Accueil",
+        "Chantiers",
         "Gestion Utilisateurs",
         "Suivi de Bétonnage",
         "Suivi Contrôle Béton",
@@ -683,6 +706,7 @@ with st.sidebar:
               new_pwd,
               user_record["role"],
               user_record["can_edit"],
+              user_record.get("projets_autorises", []),
           )
           if success:
             st.session_state["users_db"][current_username]["password"] = new_pwd
@@ -718,7 +742,8 @@ def render_view(module, supabase_client):
 # 6. ROUTAGE DES VUES
 # ==========================================
 if page == "Accueil":
-  st.title("🚄 Accueil - LGV CASA SUD")
+  _nom_proj = projets_config.nom_projet(projets_config.projet_actif(st.session_state["user"]))
+  st.title(f"🚄 Accueil - {_nom_proj}")
   st.markdown("### Plateforme de Suivi et Contrôle Qualité - LPEE")
 
   st.markdown("---")
@@ -733,7 +758,7 @@ if page == "Accueil":
         img = Image.open(image_path).convert("RGB")
         st.image(
             img,
-            caption="Al Boraq - Ligne à Grande Vitesse - Projet LGV CASA SUD",
+            caption="Al Boraq - Ligne à Grande Vitesse",
             use_container_width=True,
         )
       except Exception as e:
@@ -742,8 +767,8 @@ if page == "Accueil":
       st.warning("⚠️ L'image 'al_boraq.jpg' est introuvable à la racine.")
 
   st.markdown("---")
-  st.markdown("""
-    Bienvenue sur l'application centralisée de gestion des contrôles qualité pour le projet **LGV CASA SUD**.
+  st.markdown(f"""
+    Bienvenue sur l'application centralisée de gestion des contrôles qualité pour le projet **{_nom_proj}**.
 
     Utilisez le menu de navigation latéral pour accéder aux différents modules de consultation et de suivi.
     """)
@@ -755,11 +780,11 @@ elif page == "Gestion Utilisateurs" and current_role == "admin":
       " plateforme (sauvegarde permanente Supabase)."
   )
 
-  ROLES_LIST = ["laboratoire", "restricted_betonnage", "admin", "user"]
-  PROJETS_LIST = list(projets_config.PROJETS.keys())
+  ROLES_LIST = ["laboratoire", "restricted_betonnage", "responsable_chantier", "admin", "user"]
+  _registre = projets_config.get_projets()
+  PROJETS_LIST = list(_registre.keys())
   PROJETS_LABELS = {
-      p: f"{projets_config.PROJETS[p]['nom']} ({projets_config.PROJETS[p]['client']})"
-      for p in PROJETS_LIST
+      p: f"{_registre[p]['nom']} ({_registre[p]['client']})" for p in PROJETS_LIST
   }
 
   col_add, col_edit, col_del = st.columns(3)
@@ -946,6 +971,71 @@ elif page == "Gestion Utilisateurs" and current_role == "admin":
     })
 
   st.dataframe(data_users, use_container_width=True)
+
+elif page == "Chantiers" and current_role in projets_config.ROLES_CREATEURS_PROJET:
+  st.title("🏗️ Mes Chantiers")
+  _reg = projets_config.get_projets()
+  _mes = projets_config.liste_projets_utilisateur(st.session_state["user"])
+  st.caption(
+      "Vous ne voyez que les chantiers auxquels vous avez accès."
+      if current_role != "admin"
+      else "En tant qu'administrateur, vous voyez tous les chantiers."
+  )
+  if _mes:
+    st.dataframe(
+        [
+            {
+                "Identifiant": p,
+                "Chantier": _reg[p]["nom"],
+                "Client": _reg[p]["client"],
+                "Créé par": _reg[p].get("cree_par") or "-",
+            }
+            for p in _mes
+        ],
+        use_container_width=True,
+        hide_index=True,
+    )
+  else:
+    st.info("Aucun chantier pour le moment.")
+
+  st.markdown("---")
+  st.subheader("➕ Créer un nouveau chantier")
+  with st.form("creer_chantier_form", clear_on_submit=True):
+    nom_ch = st.text_input("Nom du chantier", placeholder="ex : Pont Oued Bouregreg")
+    client_ch = st.text_input("Client", placeholder="ex : TGCC")
+    submit_ch = st.form_submit_button("Créer le chantier", type="primary")
+    if submit_ch:
+      _u = st.session_state["users_db"].get(current_username)
+      if current_role != "admin" and not _u:
+        st.error(
+            "❌ Votre compte n'est pas enregistré en base : un compte nommé est"
+            " nécessaire pour créer un chantier."
+        )
+      else:
+        ok, resultat = projets_config.creer_projet(
+            supabase, nom_ch, client_ch, current_username
+        )
+        if not ok:
+          st.error(f"❌ {resultat}")
+        else:
+          nouveau_pid = resultat
+          if current_role != "admin":
+            # Le créateur reçoit automatiquement l'accès à son nouveau chantier
+            projets_maj = list(_u.get("projets_autorises", [])) + [nouveau_pid]
+            ok_u, err_u = save_user_db(
+                current_username, _u["password"], _u["role"], _u["can_edit"], projets_maj
+            )
+            if not ok_u:
+              st.error(
+                  f"⚠️ Chantier créé mais accès non attribué : {err_u}."
+                  " Contactez un administrateur."
+              )
+              st.stop()
+            st.session_state["users_db"] = load_users()
+            st.session_state["user"]["projets_autorises"] = projets_maj
+          st.session_state["projet_actif"] = nouveau_pid
+          st.success(f"✅ Chantier « {nom_ch.strip()} » créé et sélectionné.")
+          st.rerun()
 
 elif page == "Suivi de Bétonnage":
   render_view(suivi_Betonnage, supabase)
