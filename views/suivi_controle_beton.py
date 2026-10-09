@@ -323,7 +323,7 @@ def generer_pv_excel(export_data, infos_header):
     ws["E2"] = "DOSSIER :"
     format_cell(ws["E2"], font_bold, align_left)
     ws.merge_cells("F2:H2")
-    ws["F2"] = remplacer_na(infos_header.get("dossier"), "2025-260-05985-2025-0247")
+    ws["F2"] = remplacer_na(infos_header.get("dossier"), projets_config.dossier_pv("2025-260-05985-2025-0247"))
     format_cell(ws["F2"], font_regular, align_left)
 
     ws["E3"] = "CLIENT :"
@@ -382,7 +382,7 @@ def generer_pv_excel(export_data, infos_header):
     format_cell(ws["A8"], font_bold, align_center)
 
     ws.merge_cells("B8:D8")
-    ws["B8"] = remplacer_na(infos_header.get("chantier"), "Augmentation de la capacité ferroviaire entre Kenitra et Marrakech et au niveau du hub de Casablanca\nTravaux d'exécution de terrassement, ouvrages d'art et rétablissement de communication entre PK 5+450 et PK 10+000-GARE CASA SUD")
+    ws["B8"] = remplacer_na(infos_header.get("chantier"), projets_config.chantier_pv("Augmentation de la capacité ferroviaire entre Kenitra et Marrakech et au niveau du hub de Casablanca\nTravaux d'exécution de terrassement, ouvrages d'art et rétablissement de communication entre PK 5+450 et PK 10+000-GARE CASA SUD"))
     format_cell(ws["B8"], font_small, align_center)
 
     ws.merge_cells("E8:F8")
