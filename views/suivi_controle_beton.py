@@ -329,7 +329,7 @@ def generer_pv_excel(export_data, infos_header):
     ws["E3"] = "CLIENT :"
     format_cell(ws["E3"], font_bold, align_left)
     ws.merge_cells("F3:H3")
-    ws["F3"] = remplacer_na(infos_header.get("client"), "TGCC")
+    ws["F3"] = remplacer_na(infos_header.get("client"), projets_config.client_projet())
     format_cell(ws["F3"], font_bold, align_left)
 
     for r in range(1, 4):
