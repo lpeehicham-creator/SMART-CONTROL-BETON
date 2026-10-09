@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Suivi de Bétonnage — Mode Hors-Ligne</title>
+<meta name="theme-color" content="#0066cc" />
+<style>
+  :root {
+    --bleu: #0066cc;
+    --vert: #1a7f37;
+    --rouge: #c0392b;
+    --gris-fond: #f4f6f8;
+    --gris-bordure: #d0d7de;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    background: var(--gris-fond);
+    color: #1c1c1c;
+    padding-bottom: 80px;
+  }
+  header {
+    background: var(--bleu);
+    color: white;
+    padding: 14px 16px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  header h1 {
+    margin: 0;
+    font-size: 18px;
+  }
+  #statut-reseau {
+    display: inline-block;
+    margin-top: 6px;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .statut-en-ligne { background: rgba(255,255,255,0.25); }
+  .statut-hors-ligne { background: rgba(0,0,0,0.25); }
+
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 16px;
+  }
+
+  .bandeau-hors-ligne {
+    background: #fff3cd;
+    border: 1px solid #ffe69c;
+    color: #664d03;
+    padding: 10px 14px;
+    border-radius: 8px;
+    margin-bottom: 14px;
+    font-size: 14px;
+    display: none;
+  }
+  .bandeau-hors-ligne.visible { display: block; }
+
+  .carte {
+    background: white;
+    border: 1px solid var(--gris-bordure);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .carte h2 {
+    font-size: 15px;
+    margin: 0 0 12px 0;
+    color: #333;
+  }
+
+  label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: #444;
+    margin: 12px 0 4px 0;
+  }
+  input, select, textarea {
+    width: 100%;
+    padding: 11px 10px;
+    font-size: 16px; /* évite le zoom auto iOS */
+    border: 1px solid var(--gris-bordure);
+    border-radius: 8px;
+    background: white;
+  }
+  textarea { resize: vertical; min-height: 60px; }
+  input:disabled { background: #f0f0f0; color: #888; }
+
+  .ligne-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+  .bouton {
+    width: 100%;
+    padding: 14px;
+    font-size: 16px;
+    font-weight: 700;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    margin-top: 16px;
+  }
+  .bouton-principal { background: var(--bleu); color: white; }
+  .bouton-principal:active { background: #004c99; }
+  .bouton-secondaire {
+    background: white;
+    color: var(--bleu);
+    border: 1px solid var(--bleu);
+  }
+  .bouton-petit {
+    padding: 6px 10px;
+    font-size: 13px;
+    border-radius: 6px;
+    border: 1px solid var(--gris-bordure);
+    background: white;
+    cursor: pointer;
+  }
+
+  #message-confirmation {
+    display: none;
+    padding: 12px 14px;
+    border-radius: 8px;
+    margin-bottom: 14px;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .msg-succes { background: #d1e7dd; color: #0a3622; display: block !important; }
+  .msg-erreur { background: #f8d7da; color: #58151c; display: block !important; }
+
+  .fiche-attente {
+    border: 1px solid var(--gris-bordure);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    font-size: 13px;
+  }
+  .fiche-attente .ligne-titre {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: 600;
+  }
+  .badge {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 700;
+  }
+  .badge-attente { background: #fff3cd; color: #664d03; }
+  .badge-erreur { background: #f8d7da; color: #58151c; }
+  .badge-envoi { background: #cfe2ff; color: #084298; }
+
+  .actions-fiche { margin-top: 6px; display: flex; gap: 8px; }
+
+  #compteur-attente {
+    font-size: 13px;
+    color: #555;
+    margin-bottom: 8px;
+  }
+</style>
+</head>
+<body>
+
+<div id="ecran-code-acces" style="
+    position: fixed; inset: 0; background: white; z-index: 100;
+    display: flex; align-items: center; justify-content: center; padding: 24px;">
+  <div style="max-width: 360px; width: 100%; text-align: center;">
+    <div style="font-size: 40px; margin-bottom: 8px;">🔒</div>
+    <h2 style="margin: 0 0 6px 0;">Accès réservé</h2>
+    <p style="color: #555; font-size: 14px; margin-bottom: 16px;">
+      Cette page est réservée aux agents LPEE. Entrez le code d'accès
+      terrain qui vous a été communiqué.
+    </p>
+    <input type="password" id="champ-code-acces" placeholder="Code d'accès"
+      style="width:100%; padding:12px; font-size:16px; border:1px solid #d0d7de; border-radius:8px; text-align:center;" />
+    <button id="btn-valider-code" class="bouton bouton-principal" style="margin-top:12px;">
+      Valider
+    </button>
+    <div id="erreur-code" style="color:#c0392b; font-size:13px; margin-top:8px; display:none;">
+      Code incorrect. Vérifiez auprès de votre responsable.
+    </div>
+  </div>
+</div>
+
+<header>
+  <h1>🏗️ Suivi de Bétonnage — Saisie Terrain</h1>
+  <span id="statut-reseau" class="statut-hors-ligne">Vérification...</span>
+</header>
+
+<main>
+
+  <div class="bandeau-hors-ligne" id="bandeau-hors-ligne">
+    📴 <strong>Mode hors-ligne.</strong> Vos saisies sont enregistrées sur cet
+    appareil et seront envoyées automatiquement à Supabase dès que la
+    connexion sera rétablie. Ne fermez pas l'onglet / gardez l'appli
+    installée sur l'écran d'accueil.
+  </div>
+
+  <div id="message-confirmation"></div>
+
+  <div class="carte">
+    <h2>📋 Nouvelle fiche de bétonnage</h2>
+
+    <label for="f_date">Date de livraison</label>
+    <input type="date" id="f_date" />
+
+    <div class="ligne-2">
+      <div>
+        <label for="f_tech">Nom du Technicien LPEE</label>
+        <input type="text" id="f_tech" placeholder="Agent LPEE" />
+      </div>
+      <div>
+        <label for="f_bl">N° BL</label>
+        <input type="text" id="f_bl" placeholder="BL-2026-001" />
+      </div>
+    </div>
+
+    <label for="f_ouvrage">Ouvrage</label>
+    <input type="text" id="f_ouvrage" placeholder="Voile / Semelle" />
+
+    <div class="ligne-2">
+      <div>
+        <label for="f_qte">Quantité (m³)</label>
+        <input type="number" id="f_qte" step="0.5" min="0" value="8" />
+      </div>
+      <div>
+        <label for="f_client">Client</label>
+        <input type="text" id="f_client" value="TGCC" disabled />
+      </div>
+    </div>
+
+    <div class="ligne-2">
+      <div>
+        <label for="f_h_fin">Heure de fin de production</label>
+        <input type="time" id="f_h_fin" value="08:00" />
+      </div>
+      <div>
+        <label for="f_h_arr">Heure d'arrivée au chantier</label>
+        <input type="time" id="f_h_arr" value="08:35" />
+      </div>
+    </div>
+    <label>Durée de transport / attente</label>
+    <input type="text" id="f_duree" disabled value="35 min" />
+
+    <div class="ligne-2">
+      <div>
+        <label for="f_classe">Classe</label>
+        <select id="f_classe">
+          <option>C25/30</option>
+          <option>C30/37</option>
+          <option selected>C35/45</option>
+          <option>C40/50</option>
+          <option>C45/55</option>
+        </select>
+      </div>
+      <div>
+        <label for="f_centrale">Centrale à Béton</label>
+        <input type="text" id="f_centrale" value="TG PREFA" />
+      </div>
+    </div>
+
+    <div class="ligne-2">
+      <div>
+        <label for="f_meteo">Météo</label>
+        <select id="f_meteo">
+          <option>Ensoleillé ☀️</option>
+          <option>Nuageux ☁️</option>
+          <option>Pluie 🌧️</option>
+        </select>
+      </div>
+      <div>
+        <label for="f_affaissement">Affaissement (mm)</label>
+        <input type="number" id="f_affaissement" min="0" step="10" value="150" />
+      </div>
+    </div>
+
+    <div class="ligne-2">
+      <div>
+        <label for="f_t_beton">Température du Béton (°C)</label>
+        <input type="number" id="f_t_beton" step="0.1" value="20.0" />
+      </div>
+      <div>
+        <label for="f_t_amb">Température Ambiante (°C)</label>
+        <input type="number" id="f_t_amb" step="0.1" value="25.0" />
+      </div>
+    </div>
+
+    <div class="ligne-2">
+      <div>
+        <label for="f_prel">Prélèvement</label>
+        <select id="f_prel">
+          <option>OUI</option>
+          <option>NON</option>
+        </select>
+      </div>
+      <div>
+        <label for="f_eprouv">Nb d'éprouvettes</label>
+        <input type="number" id="f_eprouv" min="0" value="6" />
+      </div>
+    </div>
+
+    <label for="f_obs">Observations</label>
+    <textarea id="f_obs" placeholder="Béton conforme">Béton conforme</textarea>
+
+    <button class="bouton bouton-principal" id="btn-enregistrer">
+      💾 Enregistrer la fiche
+    </button>
+  </div>
+
+  <div class="carte">
+    <h2>📦 File d'attente de synchronisation</h2>
+    <div id="compteur-attente">Chargement...</div>
+    <div id="liste-attente"></div>
+    <button class="bouton bouton-secondaire" id="btn-sync-manuel">
+      🔄 Forcer la synchronisation maintenant
+    </button>
+  </div>
+
+</main>
+
+<script>
+// =====================================================================
+// CONFIGURATION — à adapter avec vos propres identifiants Supabase
+// =====================================================================
+const SUPABASE_URL = "https://votre-projet.supabase.co";
+const SUPABASE_ANON_KEY = "VOTRE_CLE_PUBLISHABLE_ICI";
+const TABLE = "suivi_betonnage";
+
+// Doit être IDENTIQUE au code configuré côté Supabase (politique RLS) et
+// côté app.py (secret CODE_ACCES_TERRAIN).
+const CODE_ACCES_ATTENDU = "lpee2026";
+const CLE_LOCALSTORAGE_CODE = "betonnage_code_acces_valide";
+
+// =====================================================================
+// ÉCRAN DE CODE D'ACCÈS
+// =====================================================================
+function codeDejaValide() {
+  return localStorage.getItem(CLE_LOCALSTORAGE_CODE) === "oui";
+}
+
+function masquerEcranCode() {
+  document.getElementById("ecran-code-acces").style.display = "none";
+}
+
+document.getElementById("btn-valider-code").addEventListener("click", () => {
+  const saisi = document.getElementById("champ-code-acces").value.trim();
+  if (saisi === CODE_ACCES_ATTENDU) {
+    localStorage.setItem(CLE_LOCALSTORAGE_CODE, "oui");
+    masquerEcranCode();
+  } else {
+    document.getElementById("erreur-code").style.display = "block";
+  }
+});
+document.getElementById("champ-code-acces").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") document.getElementById("btn-valider-code").click();
+});
+
+if (codeDejaValide()) {
+  masquerEcranCode();
+}
+
+// =====================================================================
+// INDEXEDDB — file d'attente locale des fiches non encore synchronisées
+// =====================================================================
+const DB_NAME = "betonnage_offline_db";
+const STORE_NAME = "fiches_en_attente";
+
+function ouvrirDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME, { keyPath: "cle_locale" });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function ajouterFicheEnAttente(fiche) {
+  const db = await ouvrirDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    tx.objectStore(STORE_NAME).put(fiche);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function listerFichesEnAttente() {
+  const db = await ouvrirDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readonly");
+    const req = tx.objectStore(STORE_NAME).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function supprimerFicheEnAttente(cle_locale) {
+  const db = await ouvrirDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    tx.objectStore(STORE_NAME).delete(cle_locale);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function majFicheEnAttente(fiche) {
+  return ajouterFicheEnAttente(fiche); // put() fait aussi office de update
+}
+
+// =====================================================================
+// ÉTAT RÉSEAU
+// =====================================================================
+function majBandeauReseau() {
+  const badge = document.getElementById("statut-reseau");
+  const bandeau = document.getElementById("bandeau-hors-ligne");
+  if (navigator.onLine) {
+    badge.textContent = "🟢 En ligne";
+    badge.className = "statut-en-ligne";
+    bandeau.classList.remove("visible");
+  } else {
+    badge.textContent = "🔴 Hors-ligne";
+    badge.className = "statut-hors-ligne";
+    bandeau.classList.add("visible");
+  }
+}
+
+// =====================================================================
+// CALCUL AUTOMATIQUE DE LA DURÉE DE TRANSPORT
+// =====================================================================
+function majDuree() {
+  const hFin = document.getElementById("f_h_fin").value || "08:00";
+  const hArr = document.getElementById("f_h_arr").value || "08:00";
+  const [hf, mf] = hFin.split(":").map(Number);
+  const [ha, ma] = hArr.split(":").map(Number);
+  let dureeMin = (ha * 60 + ma) - (hf * 60 + mf);
+  if (dureeMin < 0) dureeMin += 1440;
+  document.getElementById("f_duree").value = dureeMin + " min";
+}
+document.getElementById("f_h_fin").addEventListener("change", majDuree);
+document.getElementById("f_h_arr").addEventListener("change", majDuree);
+
+// Prélèvement OUI/NON -> active/désactive le nb d'éprouvettes
+document.getElementById("f_prel").addEventListener("change", (e) => {
+  const champEprouv = document.getElementById("f_eprouv");
+  if (e.target.value === "NON") {
+    champEprouv.value = 0;
+    champEprouv.disabled = true;
+  } else {
+    champEprouv.disabled = false;
+    if (champEprouv.value == 0) champEprouv.value = 6;
+  }
+});
+
+// =====================================================================
+// LECTURE DU FORMULAIRE -> PAYLOAD (mêmes champs que le formulaire
+// Streamlit d'origine, table "suivi_betonnage")
+// =====================================================================
+function lireFormulaire() {
+  return {
+    date_livraison: document.getElementById("f_date").value,
+    technicien: document.getElementById("f_tech").value.trim() || "Agent LPEE",
+    bl_num: document.getElementById("f_bl").value.trim(),
+    ouvrage: document.getElementById("f_ouvrage").value.trim(),
+    quantite_m3: parseFloat(document.getElementById("f_qte").value) || 0,
+    client: document.getElementById("f_client").value,
+    classe_beton: document.getElementById("f_classe").value,
+    centrale_beton: document.getElementById("f_centrale").value.trim(),
+    meteo: document.getElementById("f_meteo").value,
+    heure_fin_coulage: document.getElementById("f_h_fin").value,
+    heure_arrivee: document.getElementById("f_h_arr").value,
+    temperature: parseFloat(document.getElementById("f_t_beton").value) || 0,
+    temperature_ambiante: parseFloat(document.getElementById("f_t_amb").value) || 0,
+    affaissement: parseInt(document.getElementById("f_affaissement").value) || 0,
+    prelevement: document.getElementById("f_prel").value,
+    nb_eprouvettes:
+      document.getElementById("f_prel").value === "NON"
+        ? 0
+        : parseInt(document.getElementById("f_eprouv").value) || 0,
+    observations: document.getElementById("f_obs").value.trim(),
+  };
+}
+
+function viderFormulaire() {
+  document.getElementById("f_date").value = new Date().toISOString().slice(0, 10);
+  document.getElementById("f_bl").value = "";
+  document.getElementById("f_ouvrage").value = "";
+  document.getElementById("f_qte").value = 8;
+  document.getElementById("f_obs").value = "Béton conforme";
+  // Le nom du technicien est volontairement conservé d'une fiche à l'autre.
+}
+
+function afficherMessage(texte, type) {
+  const el = document.getElementById("message-confirmation");
+  el.textContent = texte;
+  el.className = type === "erreur" ? "msg-erreur" : "msg-succes";
+  setTimeout(() => { el.className = ""; el.style.display = "none"; }, 5000);
+}
+
+// =====================================================================
+// ENREGISTREMENT D'UNE FICHE (toujours en local d'abord, sync ensuite)
+// =====================================================================
+document.getElementById("btn-enregistrer").addEventListener("click", async () => {
+  const payload = lireFormulaire();
+
+  if (!payload.bl_num) {
+    afficherMessage("⚠️ Le numéro BL ne peut pas être vide.", "erreur");
+    return;
+  }
+
+  const fiche = {
+    cle_locale: "local_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8),
+    payload: payload,
+    statut: "en_attente", // en_attente | envoi | erreur
+    erreur_message: null,
+    cree_le: new Date().toISOString(),
+  };
+
+  await ajouterFicheEnAttente(fiche);
+  viderFormulaire();
+  await rafraichirListeAttente();
+
+  afficherMessage(
+    navigator.onLine
+      ? "✅ Fiche enregistrée — synchronisation en cours..."
+      : "✅ Fiche enregistrée localement (hors-ligne). Elle sera envoyée dès que la connexion reviendra.",
+    "succes"
+  );
+
+  if (navigator.onLine) synchroniser();
+});
+
+// =====================================================================
+// SYNCHRONISATION VERS SUPABASE
+// =====================================================================
+let synchronisationEnCours = false;
+
+async function synchroniser() {
+  if (synchronisationEnCours || !navigator.onLine) return;
+  synchronisationEnCours = true;
+
+  try {
+    const fiches = await listerFichesEnAttente();
+    const aEnvoyer = fiches.filter((f) => f.statut !== "envoi");
+
+    for (const fiche of aEnvoyer) {
+      fiche.statut = "envoi";
+      await majFicheEnAttente(fiche);
+      await rafraichirListeAttente();
+
+      try {
+        const resp = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+            "x-code-acces-terrain": CODE_ACCES_ATTENDU,
+            Prefer: "return=minimal",
+          },
+          body: JSON.stringify(fiche.payload),
+        });
+
+        if (resp.ok) {
+          await supprimerFicheEnAttente(fiche.cle_locale);
+        } else {
+          const texte = await resp.text();
+          fiche.statut = "erreur";
+          fiche.erreur_message = `HTTP ${resp.status} : ${texte.slice(0, 200)}`;
+          await majFicheEnAttente(fiche);
+        }
+      } catch (err) {
+        // Coupure réseau en plein envoi : on remet en attente pour réessayer plus tard.
+        fiche.statut = "en_attente";
+        fiche.erreur_message = null;
+        await majFicheEnAttente(fiche);
+        break; // inutile d'essayer les suivantes si le réseau vient de tomber
+      }
+    }
+  } finally {
+    synchronisationEnCours = false;
+    await rafraichirListeAttente();
+  }
+}
+
+// =====================================================================
+// AFFICHAGE DE LA FILE D'ATTENTE
+// =====================================================================
+async function rafraichirListeAttente() {
+  const fiches = await listerFichesEnAttente();
+  const conteneur = document.getElementById("liste-attente");
+  const compteur = document.getElementById("compteur-attente");
+
+  if (fiches.length === 0) {
+    compteur.textContent = "🟢 Aucune fiche en attente — tout est synchronisé.";
+    conteneur.innerHTML = "";
+    return;
+  }
+
+  const nbErreurs = fiches.filter((f) => f.statut === "erreur").length;
+  compteur.textContent =
+    `📦 ${fiches.length} fiche(s) en attente` +
+    (nbErreurs > 0 ? ` — ⚠️ ${nbErreurs} en erreur` : "");
+
+  conteneur.innerHTML = fiches
+    .slice()
+    .reverse()
+    .map((f) => {
+      const badge =
+        f.statut === "erreur"
+          ? '<span class="badge badge-erreur">Erreur</span>'
+          : f.statut === "envoi"
+          ? '<span class="badge badge-envoi">Envoi...</span>'
+          : '<span class="badge badge-attente">En attente</span>';
+      const heure = new Date(f.cree_le).toLocaleString("fr-FR");
+      return `
+        <div class="fiche-attente">
+          <div class="ligne-titre">
+            <span>BL ${f.payload.bl_num || "-"} — ${f.payload.ouvrage || "-"}</span>
+            ${badge}
+          </div>
+          <div>${heure} · ${f.payload.quantite_m3} m³ · ${f.payload.classe_beton}</div>
+          ${f.erreur_message ? `<div style="color:#c0392b;margin-top:4px;">${f.erreur_message}</div>` : ""}
+          <div class="actions-fiche">
+            <button class="bouton-petit" onclick="supprimerEtRafraichir('${f.cle_locale}')">🗑️ Supprimer</button>
+          </div>
+        </div>`;
+    })
+    .join("");
+}
+
+async function supprimerEtRafraichir(cle_locale) {
+  if (!confirm("Supprimer définitivement cette fiche non synchronisée ?")) return;
+  await supprimerFicheEnAttente(cle_locale);
+  await rafraichirListeAttente();
+}
+
+document.getElementById("btn-sync-manuel").addEventListener("click", () => {
+  if (!navigator.onLine) {
+    afficherMessage("📴 Toujours hors-ligne : impossible de synchroniser pour le moment.", "erreur");
+    return;
+  }
+  synchroniser();
+});
+
+// =====================================================================
+// DÉTECTION AUTOMATIQUE DU RETOUR EN LIGNE
+// =====================================================================
+window.addEventListener("online", () => {
+  majBandeauReseau();
+  synchroniser();
+});
+window.addEventListener("offline", majBandeauReseau);
+
+// Filet de sécurité : certains navigateurs mobiles ne déclenchent pas
+// toujours l'événement 'online' de façon fiable en arrière-plan. On
+// retente donc périodiquement, sans rien faire s'il n'y a rien en attente.
+setInterval(() => {
+  if (navigator.onLine) synchroniser();
+}, 20000);
+
+// =====================================================================
+// INITIALISATION
+// =====================================================================
+window.addEventListener("load", async () => {
+  majBandeauReseau();
+  document.getElementById("f_date").value = new Date().toISOString().slice(0, 10);
+  majDuree();
+  await rafraichirListeAttente();
+  if (navigator.onLine) synchroniser();
+
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("sw-betonnage.js")
+      .then((reg) => console.log("Service Worker (hors-ligne) enregistré", reg))
+      .catch((err) => console.error("Erreur Service Worker :", err));
+  }
+});
+</script>
+
+</body>
+</html>
