@@ -1086,7 +1086,7 @@ def show(supabase):
   is_baallal_admin = str(user_info.get("username", "")).strip().upper() == "BAALLAL" and role == "admin"
 
   if (
-      role not in ["laboratoire", "labo", "admin", "responsable_labo", "qualite"]
+      role not in ["laboratoire", "labo", "admin", "responsable_labo", "responsable_chantier", "qualite"]
       and not is_admin
       and not can_edit
   ):
