@@ -1,8 +1,8 @@
 """
 Configuration centrale des projets/chantiers et fonctions utilitaires pour
 appliquer la séparation des données par projet dans tous les modules
-(Suivi de Bétonnage, Essai à la Plaque, Suivi Contrôle Béton, Synthèse
-Béton, Synthèse Plaque, Historique Complet & PVs).
+(Suivi de Bétonnage, Suivi Contrôle Béton, Synthèse Béton, Historique
+Complet & PVs).
 
 Module séparé (plutôt que défini dans app.py) car les modules de vues
 (views/*.py) ne peuvent pas importer app.py sans créer une dépendance
@@ -91,3 +91,16 @@ def filtrer_par_projet(query, user_info, colonne="projet_id"):
         # non filtrée (qui montrerait tout par erreur).
         return query.in_(colonne, ["__aucun_projet_autorise__"])
     return query.in_(colonne, projets)
+
+
+def filtrer_projet_actif(query, colonne="projet_id"):
+    """Restreint une requête Supabase au SEUL projet actif de la session.
+
+    À utiliser sur TOUTE lecture/écriture faite à partir d'un identifiant
+    (id, betonnage_id, scan QR...) : sans ça, un identifiant appartenant à
+    un autre chantier renverrait quand même sa fiche. Si aucun projet n'est
+    autorisé, la requête est forcée à ne rien renvoyer (jamais "tout")."""
+    pid = projet_actif(st.session_state.get("user") or {})
+    if not pid:
+        return query.eq(colonne, "__aucun_projet_autorise__")
+    return query.eq(colonne, pid)
