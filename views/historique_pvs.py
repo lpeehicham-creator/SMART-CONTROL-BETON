@@ -243,7 +243,7 @@ def generer_pv_excel(export_data, infos_header):
   set_cell(2, 1, "Laboratoire de Contrôle Externe", bold=True, fill=DARK_FILL, color="FFFFFF")
   set_cell(2, 5, "DOSSIER :", bold=True)
   merge(2, 6, 2, 8)
-  set_cell(2, 6, clean_na(infos_header.get("dossier"), "2025-260-05985-2025-0247"))
+  set_cell(2, 6, clean_na(infos_header.get("dossier"), projets_config.dossier_pv("2025-260-05985-2025-0247")))
   set_cell(3, 5, "CLIENT :", bold=True)
   merge(3, 6, 3, 8)
   set_cell(3, 6, clean_na(infos_header.get("client"), projets_config.client_projet()), bold=True)
@@ -276,9 +276,7 @@ def generer_pv_excel(export_data, infos_header):
   merge(8, 2, 8, 4)
   set_cell(8, 2, clean_na(
       infos_header.get("chantier"),
-      "LGV-Travaux d'exécution de terrassement, ouvrages d'art et"
-      " rétablissement de communication entre PK 5+500 et PK"
-      " 10+000-GARE CASA SUD.",
+      projets_config.chantier_pv("LGV-Travaux d'exécution de terrassement, ouvrages d'art et rétablissement de communication entre PK 5+500 et PK 10+000-GARE CASA SUD."),
   ), size=7, wrap=True)
   merge(8, 5, 8, 6)
   set_cell(8, 5, "Type de béton", bold=True, fill=LABEL_FILL)
@@ -552,7 +550,7 @@ def generer_pv_pdf(export_data, infos_header):
   r = blank_row()
   r[0] = "Laboratoire de Contrôle Externe"
   r[4] = "DOSSIER :"
-  r[5] = clean_na(infos_header.get("dossier"), "2025-260-05985-2025-0247")
+  r[5] = clean_na(infos_header.get("dossier"), projets_config.dossier_pv("2025-260-05985-2025-0247"))
   data.append(r)
   row1 = len(data) - 1
 
@@ -624,9 +622,7 @@ def generer_pv_pdf(export_data, infos_header):
   r[1] = P(
       clean_na(
           infos_header.get("chantier"),
-          "LGV-Travaux d'exécution de terrassement, ouvrages d'art et"
-          " rétablissement de communication entre PK 5+500 et PK"
-          " 10+000-GARE CASA SUD.",
+          projets_config.chantier_pv("LGV-Travaux d'exécution de terrassement, ouvrages d'art et rétablissement de communication entre PK 5+500 et PK 10+000-GARE CASA SUD."),
       ),
       size=7,
   )
@@ -1326,7 +1322,7 @@ def show(supabase):
 
         infos_header_h = {
             "re_num": "25/260/LGV/ B/",
-            "dossier": "2025-260-05985-2025-0247",
+            "dossier": projets_config.dossier_pv("2025-260-05985-2025-0247"),
             "client": projets_config.client_projet(),
             "num_reception": ref_ctrl_h,
             "ref_controle": ref_ctrl_h,
