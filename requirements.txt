@@ -1,0 +1,13 @@
+streamlit
+supabase
+pandas
+openpyxl
+pillow
+bcrypt
+plotly
+fpdf2
+matplotlib
+qrcode
+Pillow
+extra-streamlit-components
+reportlab
