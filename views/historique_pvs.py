@@ -59,10 +59,11 @@ def verifier_doublon_num_reception(
     return False
   try:
     res = (
-        supabase.table("suivi_betonnage")
-        .select("id, num_reception")
-        .eq("num_reception", num_clean)
-        .execute()
+        projets_config.filtrer_projet_actif(
+            supabase.table("suivi_betonnage")
+            .select("id, num_reception")
+            .eq("num_reception", num_clean)
+        ).execute()
     )
     for m in res.data or []:
       if current_beton_id is None or int(m.get("id")) != int(current_beton_id):
@@ -989,11 +990,11 @@ def obtenir_historique_betonnage(supabase, betonnage_id):
     return []
   try:
     res = (
-        supabase.table("suivi_controle_beton")
-        .select("*")
-        .eq("betonnage_id", betonnage_id)
-        .order("id")
-        .execute()
+        projets_config.filtrer_projet_actif(
+            supabase.table("suivi_controle_beton")
+            .select("*")
+            .eq("betonnage_id", betonnage_id)
+        ).order("id").execute()
     )
     return res.data or []
   except Exception:
@@ -1005,10 +1006,11 @@ def obtenir_infos_betonnage_parent(supabase, betonnage_id):
     return {}
   try:
     res = (
-        supabase.table("suivi_betonnage")
-        .select("*")
-        .eq("id", betonnage_id)
-        .execute()
+        projets_config.filtrer_projet_actif(
+            supabase.table("suivi_betonnage")
+            .select("*")
+            .eq("id", betonnage_id)
+        ).execute()
     )
     return res.data[0] if res.data else {}
   except Exception:
@@ -1021,10 +1023,11 @@ def obtenir_infos_betonnage_parents_bulk(supabase, betonnage_ids):
     return {}
   try:
     res = (
-        supabase.table("suivi_betonnage")
-        .select("*")
-        .in_("id", ids_valides)
-        .execute()
+        projets_config.filtrer_projet_actif(
+            supabase.table("suivi_betonnage")
+            .select("*")
+            .in_("id", ids_valides)
+        ).execute()
     )
     return {p["id"]: p for p in (res.data or [])}
   except Exception as e:
