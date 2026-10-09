@@ -246,7 +246,7 @@ def generer_pv_excel(export_data, infos_header):
   set_cell(2, 6, clean_na(infos_header.get("dossier"), "2025-260-05985-2025-0247"))
   set_cell(3, 5, "CLIENT :", bold=True)
   merge(3, 6, 3, 8)
-  set_cell(3, 6, clean_na(infos_header.get("client"), "TGCC"), bold=True)
+  set_cell(3, 6, clean_na(infos_header.get("client"), projets_config.client_projet()), bold=True)
 
   merge(4, 1, 4, 8)
   set_cell(4, 1, "ESSAIS MECANIQUES SUR BETON HYDRAULIQUE", bold=True, size=13, fill=DARK_FILL, color="FFFFFF")
@@ -558,7 +558,7 @@ def generer_pv_pdf(export_data, infos_header):
 
   r = blank_row()
   r[4] = "CLIENT :"
-  r[5] = clean_na(infos_header.get("client"), "TGCC")
+  r[5] = clean_na(infos_header.get("client"), projets_config.client_projet())
   data.append(r)
   row2 = len(data) - 1
 
@@ -1327,7 +1327,7 @@ def show(supabase):
         infos_header_h = {
             "re_num": "25/260/LGV/ B/",
             "dossier": "2025-260-05985-2025-0247",
-            "client": "TGCC",
+            "client": projets_config.client_projet(),
             "num_reception": ref_ctrl_h,
             "ref_controle": ref_ctrl_h,
             "num_bl": num_bl_h,
