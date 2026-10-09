@@ -240,7 +240,7 @@ try:
       "SUPABASE_URL", "https://votre-projet.supabase.co"
   )
   SUPABASE_KEY = st.secrets.get(
-      "SUPABASE_KEY", "sb_publishable_m8g5mocsCDgk3JpS1lpuCQ_3wOPyet1"
+      "sb_publishable_GjbxcCH5G-UY1TPfzizcyw_Rud4NGfM"
   )
   # Code partagé exigé par la politique RLS sur suivi_betonnage (voir le SQL
   # fourni pour la page hors-ligne). L'app principale doit envoyer le même
