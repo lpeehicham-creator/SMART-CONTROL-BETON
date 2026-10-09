@@ -193,6 +193,12 @@ def libelle_projet(projet_id):
     return txt
 
 
+def client_projet(projet_id=None):
+    """Client du projet (par défaut : le projet actif de la session)."""
+    pid = projet_id or projet_actif(st.session_state.get("user") or {})
+    return (get_projets().get(pid) or {}).get("client") or "-"
+
+
 def nom_projet(projet_id):
     """Libellé lisible d'un identifiant de projet (pour affichage)."""
     info = get_projets().get(projet_id)
