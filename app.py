@@ -1023,6 +1023,11 @@ elif page == "Chantiers" and current_role in projets_config.ROLES_CREATEURS_PROJ
     nom_ch = st.text_input("Nom du chantier", placeholder="ex : Pont Oued Bouregreg")
     client_ch = st.text_input("Client", placeholder="ex : TGCC")
     dossier_ch = st.text_input("N° de dossier", placeholder="ex : 2026/0123")
+    intitule_ch = st.text_area(
+        "Intitulé du chantier (facultatif)",
+        placeholder="Texte complet affiché dans la case « Chantier » des PV",
+        help="S'il est vide, le nom du chantier est utilisé sur les PV.",
+    )
     submit_ch = st.form_submit_button("Créer le chantier", type="primary")
     if submit_ch:
       if current_role != "admin" and not projets_config.compte_en_base(supabase, current_username):
@@ -1032,7 +1037,7 @@ elif page == "Chantiers" and current_role in projets_config.ROLES_CREATEURS_PROJ
         )
       else:
         ok, resultat = projets_config.creer_projet(
-            supabase, nom_ch, client_ch, current_username, dossier_ch
+            supabase, nom_ch, client_ch, current_username, dossier_ch, intitule_ch
         )
         if not ok:
           st.error(f"❌ {resultat}")
@@ -1073,11 +1078,16 @@ elif page == "Chantiers" and current_role in projets_config.ROLES_CREATEURS_PROJ
       nom_m = st.text_input("Nom du chantier", value=info_mod["nom"])
       client_m = st.text_input("Client", value=info_mod["client"])
       dossier_m = st.text_input("N° de dossier", value=info_mod.get("num_dossier") or "")
+      intitule_m = st.text_area(
+          "Intitulé du chantier (affiché sur les PV)",
+          value=info_mod.get("intitule") or "",
+          help="S'il est vide, le nom du chantier est utilisé sur les PV.",
+      )
       st.caption(f"Identifiant interne (non modifiable) : `{pid_mod}`")
       submit_m = st.form_submit_button("Enregistrer les modifications")
       if submit_m:
         ok_m, msg_m = projets_config.modifier_projet(
-            supabase, pid_mod, nom_m, client_m, dossier_m
+            supabase, pid_mod, nom_m, client_m, dossier_m, intitule_m
         )
         if ok_m:
           try:
