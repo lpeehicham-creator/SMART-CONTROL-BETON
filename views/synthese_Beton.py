@@ -622,13 +622,13 @@ def generate_excel_synthesis_betonnage(
   ajouter_logo_lpee(ws, "A1", hauteur_px=72)
 
   ws.merge_cells(f"A4:{mid_col_letter}4")
-  ws["A4"].value = "   CLIENT :   TGCC"
+  ws["A4"].value = f"   CLIENT :   {projets_config.client_projet()}"
   ws["A4"].font = font_bold
   ws["A4"].fill = fill_card
   ws["A4"].alignment = Alignment(horizontal="left", vertical="center")
 
   ws.merge_cells(f"{next_mid_letter}4:{last_col_letter}4")
-  ws[f"{next_mid_letter}4"].value = "   PROJET :   LGV CASA SUD"
+  ws[f"{next_mid_letter}4"].value = f"   PROJET :   {projets_config.nom_projet(projets_config.projet_actif(st.session_state.get('user') or {}))}"
   ws[f"{next_mid_letter}4"].font = font_bold
   ws[f"{next_mid_letter}4"].fill = fill_card
   ws[f"{next_mid_letter}4"].alignment = Alignment(
@@ -997,13 +997,13 @@ def generate_excel_synthesis_controle(df_data, titre_periode):
   ajouter_logo_lpee(ws, "A1", hauteur_px=72)
 
   ws.merge_cells(f"A4:{mid_col_letter}4")
-  ws["A4"].value = "   CLIENT :   TGCC"
+  ws["A4"].value = f"   CLIENT :   {projets_config.client_projet()}"
   ws["A4"].font = font_bold
   ws["A4"].fill = fill_card
   ws["A4"].alignment = Alignment(horizontal="left", vertical="center")
 
   ws.merge_cells(f"{next_mid_letter}4:{last_col_letter}4")
-  ws[f"{next_mid_letter}4"].value = "   PROJET :   LGV CASA SUD"
+  ws[f"{next_mid_letter}4"].value = f"   PROJET :   {projets_config.nom_projet(projets_config.projet_actif(st.session_state.get('user') or {}))}"
   ws[f"{next_mid_letter}4"].font = font_bold
   ws[f"{next_mid_letter}4"].fill = fill_card
   ws[f"{next_mid_letter}4"].alignment = Alignment(
