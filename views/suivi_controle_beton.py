@@ -604,7 +604,7 @@ def exporter_dataframe_excel(df, date_chaine):
 def obtenir_historique_betonnage(supabase, betonnage_id):
     if not betonnage_id: return []
     try:
-        res = supabase.table("suivi_controle_beton").select("*").eq("betonnage_id", betonnage_id).order("id", desc=False).execute()
+        res = projets_config.filtrer_projet_actif(supabase.table("suivi_controle_beton").select("*").eq("betonnage_id", betonnage_id)).order("id", desc=False).execute()
         return res.data or []
     except Exception as e:
         st.warning(f"Note : Historique du bétonnage #{betonnage_id} non disponible : {e}")
@@ -614,7 +614,7 @@ def obtenir_historique_betonnage(supabase, betonnage_id):
 def obtenir_infos_betonnage_parent(supabase, betonnage_id):
     if not betonnage_id: return {}
     try:
-        res = supabase.table("suivi_betonnage").select("*").eq("id", betonnage_id).execute()
+        res = projets_config.filtrer_projet_actif(supabase.table("suivi_betonnage").select("*").eq("id", betonnage_id)).execute()
         if res.data: return res.data[0]
     except Exception as e:
         st.warning(f"Note : Impossible de charger la fiche parent #{betonnage_id} : {e}")
@@ -627,7 +627,7 @@ def obtenir_infos_betonnage_parents_bulk(supabase, betonnage_ids):
     if not ids_valides:
         return {}
     try:
-        res = supabase.table("suivi_betonnage").select("*").in_("id", ids_valides).execute()
+        res = projets_config.filtrer_projet_actif(supabase.table("suivi_betonnage").select("*").in_("id", ids_valides)).execute()
         return {p["id"]: p for p in (res.data or [])}
     except Exception as e:
         st.warning(f"Note : Impossible de charger les fiches parentes en lot : {e}")
