@@ -43,6 +43,7 @@ def charger_projets(supabase, force=False):
                     "nom": row.get("nom") or row["id"],
                     "client": row.get("client") or "-",
                     "num_dossier": row.get("num_dossier") or "",
+                    "intitule": row.get("intitule") or "",
                     "cree_par": row.get("cree_par"),
                 }
     except Exception:
@@ -75,7 +76,7 @@ def _slug_projet(nom):
     return s[:40]
 
 
-def creer_projet(supabase, nom, client, createur, num_dossier=""):
+def creer_projet(supabase, nom, client, createur, num_dossier="", intitule=""):
     """Crée un chantier. Retourne (True, projet_id) ou (False, message).
     Réservé aux rôles admin / responsable_chantier (vérifié ici, pas
     seulement dans l'interface)."""
@@ -85,6 +86,7 @@ def creer_projet(supabase, nom, client, createur, num_dossier=""):
     nom = (nom or "").strip()
     client = (client or "").strip()
     num_dossier = (num_dossier or "").strip()
+    intitule = (intitule or "").strip()
     if len(nom) < 3:
         return False, "Le nom du chantier doit contenir au moins 3 caractères."
     if not client:
@@ -108,10 +110,11 @@ def creer_projet(supabase, nom, client, createur, num_dossier=""):
                 return True, pid
             return False, (f"Un chantier avec l'identifiant {pid} existe déjà"
                            " (créé par une autre personne). Choisissez un autre nom.")
-        supabase.table("projets").insert(
-            {"id": pid, "nom": nom, "client": client, "num_dossier": num_dossier,
-             "cree_par": createur, "actif": True}
-        ).execute()
+        ligne = {"id": pid, "nom": nom, "client": client, "num_dossier": num_dossier,
+                 "cree_par": createur, "actif": True}
+        if intitule:  # colonne facultative : n'est envoyée que si renseignée
+            ligne["intitule"] = intitule
+        supabase.table("projets").insert(ligne).execute()
     except Exception as e:
         return False, f"Erreur Supabase : {e}"
     charger_projets(supabase, force=True)
@@ -199,6 +202,30 @@ def client_projet(projet_id=None):
     return (get_projets().get(pid) or {}).get("client") or "-"
 
 
+# Valeurs historiques du chantier LGV CASA SUD (reprises telles quelles tant que
+# l'intitulé / le N° de dossier ne sont pas renseignés pour ce chantier).
+def chantier_pv(defaut_lgv, projet_id=None):
+    """Texte de la case « Chantier » des PV : intitulé du projet, sinon son
+    nom ; pour LGV CASA SUD sans intitulé, le texte historique `defaut_lgv`."""
+    pid = projet_id or projet_actif(st.session_state.get("user") or {})
+    info = get_projets().get(pid) or {}
+    if info.get("intitule"):
+        return info["intitule"]
+    if pid == PROJET_PAR_DEFAUT:
+        return defaut_lgv
+    return info.get("nom") or "-"
+
+
+def dossier_pv(defaut_lgv, projet_id=None):
+    """N° de dossier des PV : celui du projet ; pour LGV CASA SUD sans N°
+    renseigné, la valeur historique `defaut_lgv`."""
+    pid = projet_id or projet_actif(st.session_state.get("user") or {})
+    info = get_projets().get(pid) or {}
+    if info.get("num_dossier"):
+        return info["num_dossier"]
+    return defaut_lgv if pid == PROJET_PAR_DEFAUT else "-"
+
+
 def nom_projet(projet_id):
     """Libellé lisible d'un identifiant de projet (pour affichage)."""
     info = get_projets().get(projet_id)
@@ -262,13 +289,14 @@ def _projet_en_base(supabase, projet_id):
     return bool(res.data)
 
 
-def modifier_projet(supabase, projet_id, nom, client, num_dossier):
+def modifier_projet(supabase, projet_id, nom, client, num_dossier, intitule=""):
     """Modifie nom, client et N° de dossier. L'identifiant ne change jamais
     (les données y sont rattachées). Retourne (ok, message)."""
     user = st.session_state.get("user") or {}
     if not peut_modifier_projet(user, projet_id):
         return False, "Vous n'avez pas le droit de modifier ce chantier."
     nom, client, num_dossier = (nom or "").strip(), (client or "").strip(), (num_dossier or "").strip()
+    intitule = (intitule or "").strip()
     if len(nom) < 3:
         return False, "Le nom du chantier doit contenir au moins 3 caractères."
     if not client:
@@ -279,9 +307,10 @@ def modifier_projet(supabase, projet_id, nom, client, num_dossier):
         if not _projet_en_base(supabase, projet_id):
             return False, ("Ce chantier n'est pas enregistré dans la table `projets` "
                            "(exécutez ajout_table_projets.sql).")
-        supabase.table("projets").update(
-            {"nom": nom, "client": client, "num_dossier": num_dossier}
-        ).eq("id", projet_id).execute()
+        valeurs = {"nom": nom, "client": client, "num_dossier": num_dossier}
+        if intitule != ((get_projets().get(projet_id) or {}).get("intitule") or ""):
+            valeurs["intitule"] = intitule or None  # seulement si modifié
+        supabase.table("projets").update(valeurs).eq("id", projet_id).execute()
     except Exception as e:
         return False, f"Erreur Supabase : {e}"
     charger_projets(supabase, force=True)
