@@ -32,29 +32,41 @@ def charger_projets(supabase, force=False):
     if not force and "projets_registre" in st.session_state:
         return st.session_state["projets_registre"]
     registre = {}
-    if supabase:
-        try:
-            res = supabase.table("projets").select("*").execute()
-            for row in res.data or []:
-                if row.get("actif", True):
-                    registre[row["id"]] = {
-                        "nom": row.get("nom") or row["id"],
-                        "client": row.get("client") or "-",
-                        "cree_par": row.get("cree_par"),
-                    }
-        except Exception:
-            registre = {}
-    if not registre:
+    source = "base"
+    try:
+        if not supabase:
+            raise RuntimeError("Supabase non configuré")
+        res = supabase.table("projets").select("*").execute()
+        for row in res.data or []:
+            if row.get("actif", True):
+                registre[row["id"]] = {
+                    "nom": row.get("nom") or row["id"],
+                    "client": row.get("client") or "-",
+                    "num_dossier": row.get("num_dossier") or "",
+                    "cree_par": row.get("cree_par"),
+                }
+    except Exception:
+        # Table `projets` inaccessible (absente, réseau...) : registre de
+        # secours en lecture seule. Une table lue avec succès mais VIDE n'est
+        # PAS remplacée par le secours (sinon un chantier supprimé
+        # réapparaîtrait).
         registre = {k: dict(v) for k, v in _PROJETS_REPLI.items()}
+        source = "repli"
+    st.session_state["projets_registre_source"] = source
     st.session_state["projets_registre"] = registre
     return registre
 
 
 def get_projets():
     """Registre des projets de la session (dict id -> {nom, client, ...})."""
-    return st.session_state.get("projets_registre") or {
-        k: dict(v) for k, v in _PROJETS_REPLI.items()
-    }
+    if "projets_registre" in st.session_state:
+        return st.session_state["projets_registre"]
+    return {k: dict(v) for k, v in _PROJETS_REPLI.items()}
+
+
+def registre_en_secours():
+    """True si la table `projets` n'a pas pu être lue (registre de secours)."""
+    return st.session_state.get("projets_registre_source") == "repli"
 
 
 def _slug_projet(nom):
@@ -63,7 +75,7 @@ def _slug_projet(nom):
     return s[:40]
 
 
-def creer_projet(supabase, nom, client, createur):
+def creer_projet(supabase, nom, client, createur, num_dossier=""):
     """Crée un chantier. Retourne (True, projet_id) ou (False, message).
     Réservé aux rôles admin / responsable_chantier (vérifié ici, pas
     seulement dans l'interface)."""
@@ -72,10 +84,13 @@ def creer_projet(supabase, nom, client, createur):
         return False, "Votre rôle ne permet pas de créer un chantier."
     nom = (nom or "").strip()
     client = (client or "").strip()
+    num_dossier = (num_dossier or "").strip()
     if len(nom) < 3:
         return False, "Le nom du chantier doit contenir au moins 3 caractères."
     if not client:
         return False, "Le client est obligatoire."
+    if not num_dossier:
+        return False, "Le N° de dossier est obligatoire."
     pid = _slug_projet(nom)
     if not pid:
         return False, "Nom de chantier invalide."
@@ -86,7 +101,8 @@ def creer_projet(supabase, nom, client, createur):
         if existe.data:
             return False, f"Un chantier avec l'identifiant {pid} existe déjà."
         supabase.table("projets").insert(
-            {"id": pid, "nom": nom, "client": client, "cree_par": createur, "actif": True}
+            {"id": pid, "nom": nom, "client": client, "num_dossier": num_dossier,
+             "cree_par": createur, "actif": True}
         ).execute()
     except Exception as e:
         return False, f"Erreur Supabase : {e}"
@@ -132,7 +148,7 @@ def afficher_selecteur_projet(user_info):
         st.session_state["projet_actif"] = projets_dispo[0]
         return
 
-    labels = [f"{registre[p]['nom']} ({registre[p]['client']})" for p in projets_dispo]
+    labels = [libelle_projet(p) for p in projets_dispo]
     courant = st.session_state.get("projet_actif")
     index_defaut = projets_dispo.index(courant) if courant in projets_dispo else 0
 
@@ -141,6 +157,17 @@ def afficher_selecteur_projet(user_info):
         "📁 Projet actif", labels, index=index_defaut, key="selecteur_projet_actif"
     )
     st.session_state["projet_actif"] = projets_dispo[labels.index(choix_label)]
+
+
+def libelle_projet(projet_id):
+    """Nom, client et N° de dossier (s'il existe), pour les listes déroulantes."""
+    info = get_projets().get(projet_id)
+    if not info:
+        return projet_id or "-"
+    txt = f"{info['nom']} ({info['client']})"
+    if info.get("num_dossier"):
+        txt += f" - Dossier {info['num_dossier']}"
+    return txt
 
 
 def nom_projet(projet_id):
@@ -168,3 +195,108 @@ def filtrer_projet_actif(query, colonne="projet_id"):
     if not pid:
         return query.eq(colonne, "__aucun_projet_autorise__")
     return query.eq(colonne, pid)
+
+
+# ==============================================================================
+# DROITS, MODIFICATION ET SUPPRESSION D'UN CHANTIER
+# ==============================================================================
+def peut_modifier_projet(user_info, projet_id):
+    """Admin : tous les chantiers. Responsable de chantier : ceux auxquels
+    il a accès."""
+    if not user_info:
+        return False
+    if user_info.get("role") == "admin":
+        return True
+    return (
+        user_info.get("role") == "responsable_chantier"
+        and projet_id in liste_projets_utilisateur(user_info)
+    )
+
+
+def peut_supprimer_projet(user_info, projet_id):
+    """Admin : tous les chantiers. Responsable de chantier : uniquement ceux
+    qu'il a lui-même créés (la suppression efface aussi les données)."""
+    if not user_info:
+        return False
+    if user_info.get("role") == "admin":
+        return True
+    info = get_projets().get(projet_id) or {}
+    return (
+        user_info.get("role") == "responsable_chantier"
+        and bool(info.get("cree_par"))
+        and info.get("cree_par") == user_info.get("username")
+    )
+
+
+def _projet_en_base(supabase, projet_id):
+    res = supabase.table("projets").select("id").eq("id", projet_id).execute()
+    return bool(res.data)
+
+
+def modifier_projet(supabase, projet_id, nom, client, num_dossier):
+    """Modifie nom, client et N° de dossier. L'identifiant ne change jamais
+    (les données y sont rattachées). Retourne (ok, message)."""
+    user = st.session_state.get("user") or {}
+    if not peut_modifier_projet(user, projet_id):
+        return False, "Vous n'avez pas le droit de modifier ce chantier."
+    nom, client, num_dossier = (nom or "").strip(), (client or "").strip(), (num_dossier or "").strip()
+    if len(nom) < 3:
+        return False, "Le nom du chantier doit contenir au moins 3 caractères."
+    if not client:
+        return False, "Le client est obligatoire."
+    if not num_dossier:
+        return False, "Le N° de dossier est obligatoire."
+    try:
+        if not _projet_en_base(supabase, projet_id):
+            return False, ("Ce chantier n'est pas enregistré dans la table `projets` "
+                           "(exécutez ajout_table_projets.sql).")
+        supabase.table("projets").update(
+            {"nom": nom, "client": client, "num_dossier": num_dossier}
+        ).eq("id", projet_id).execute()
+    except Exception as e:
+        return False, f"Erreur Supabase : {e}"
+    charger_projets(supabase, force=True)
+    return True, "Chantier mis à jour."
+
+
+def compter_donnees_projet(supabase, projet_id):
+    """(nb fiches de bétonnage, nb éprouvettes) du chantier, None si inconnu."""
+    def _n(table):
+        try:
+            r = supabase.table(table).select("id", count="exact").eq("projet_id", projet_id).limit(1).execute()
+            return r.count
+        except Exception:
+            return None
+    return _n("suivi_betonnage"), _n("suivi_controle_beton")
+
+
+def supprimer_projet(supabase, projet_id):
+    """Supprime DÉFINITIVEMENT un chantier et toutes ses données (fiches de
+    bétonnage et éprouvettes), puis retire l'accès à tous les utilisateurs
+    (pour qu'un chantier recréé plus tard avec le même nom ne redonne pas
+    l'accès aux anciens utilisateurs). Retourne (ok, message)."""
+    user = st.session_state.get("user") or {}
+    if not peut_supprimer_projet(user, projet_id):
+        return False, "Vous n'avez pas le droit de supprimer ce chantier."
+    try:
+        if not _projet_en_base(supabase, projet_id):
+            return False, ("Ce chantier n'est pas enregistré dans la table `projets` "
+                           "(exécutez ajout_table_projets.sql).")
+        supabase.table("suivi_controle_beton").delete().eq("projet_id", projet_id).execute()
+        supabase.table("suivi_betonnage").delete().eq("projet_id", projet_id).execute()
+        supabase.table("projets").delete().eq("id", projet_id).execute()
+        # Retirer ce chantier des accès de tous les utilisateurs
+        res = supabase.table("app_users").select("username, projets_autorises").execute()
+        for row in res.data or []:
+            liste = [p.strip() for p in (row.get("projets_autorises") or "").split(",") if p.strip()]
+            if projet_id in liste:
+                liste.remove(projet_id)
+                supabase.table("app_users").update(
+                    {"projets_autorises": ",".join(liste)}
+                ).eq("username", row["username"]).execute()
+    except Exception as e:
+        return False, f"Erreur Supabase : {e}"
+    charger_projets(supabase, force=True)
+    if st.session_state.get("projet_actif") == projet_id:
+        st.session_state["projet_actif"] = None
+    return True, "Chantier supprimé."
