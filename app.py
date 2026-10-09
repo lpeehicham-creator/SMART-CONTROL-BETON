@@ -240,13 +240,13 @@ try:
       "SUPABASE_URL", "https://ibiejnzafnszsopqvuwr.supabase.co"
   )
   SUPABASE_KEY = st.secrets.get(
-     "SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImliaWVqbnphZm5zenNvcHF2dXdyIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MTU2MTExOCwiZXhwIjoyMTA3MTM3MTE4fQ.ZDJ7bPbO0IFI80VkwJqv4nKEdfhrC5vWd1Te3tFYrPI"
+      "SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImliaWVqbnphZm5zenNvcHF2dXdyIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MTU2MTExOCwiZXhwIjoyMTA3MTM3MTE4fQ.ZDJ7bPbO0IFI80VkwJqv4nKEdfhrC5vWd1Te3tFYrPI"
   )
   # Code partagé exigé par la politique RLS sur suivi_betonnage (voir le SQL
   # fourni pour la page hors-ligne). L'app principale doit envoyer le même
   # en-tête que offline_betonnage.html, sinon ses propres insertions seraient
   # bloquées par cette même règle de sécurité.
-  CODE_ACCES_TERRAIN = st.secrets.get("CODE_ACCES_TERRAIN", "lpee260")
+  CODE_ACCES_TERRAIN = st.secrets.get("CODE_ACCES_TERRAIN", "lpee2026")
 
   # Création du client SANS argument supplémentaire (comme avant) : c'est le
   # passage d'un ClientOptions à create_client() qui faisait planter la
@@ -975,7 +975,21 @@ elif page == "Gestion Utilisateurs" and current_role == "admin":
 elif page == "Chantiers" and current_role in projets_config.ROLES_CREATEURS_PROJET:
   st.title("🏗️ Mes Chantiers")
   _reg = projets_config.get_projets()
-  _mes = projets_config.liste_projets_utilisateur(st.session_state["user"])
+  _user = st.session_state["user"]
+  _mes = projets_config.liste_projets_utilisateur(_user)
+  if projets_config.registre_en_secours():
+    st.error(
+        "⚠️ La table `projets` est inaccessible : registre de secours en lecture"
+        " seule. La création, la modification et la suppression de chantiers"
+        " échoueront. Vérifiez que `ajout_table_projets.sql` a été exécuté dans"
+        " Supabase et que RLS ne bloque pas la table."
+    )
+  elif not _reg:
+    st.warning(
+        "Aucun chantier enregistré dans la table `projets`. Si vos chantiers"
+        " existants ont disparu, exécutez la partie « INSERT » de"
+        " `ajout_table_projets.sql`."
+    )
   st.caption(
       "Vous ne voyez que les chantiers auxquels vous avez accès."
       if current_role != "admin"
@@ -985,9 +999,10 @@ elif page == "Chantiers" and current_role in projets_config.ROLES_CREATEURS_PROJ
     st.dataframe(
         [
             {
-                "Identifiant": p,
+                "N° de dossier": _reg[p].get("num_dossier") or "-",
                 "Chantier": _reg[p]["nom"],
                 "Client": _reg[p]["client"],
+                "Identifiant": p,
                 "Créé par": _reg[p].get("cree_par") or "-",
             }
             for p in _mes
@@ -998,11 +1013,13 @@ elif page == "Chantiers" and current_role in projets_config.ROLES_CREATEURS_PROJ
   else:
     st.info("Aucun chantier pour le moment.")
 
+  # ---------------- Création ----------------
   st.markdown("---")
   st.subheader("➕ Créer un nouveau chantier")
   with st.form("creer_chantier_form", clear_on_submit=True):
     nom_ch = st.text_input("Nom du chantier", placeholder="ex : Pont Oued Bouregreg")
     client_ch = st.text_input("Client", placeholder="ex : TGCC")
+    dossier_ch = st.text_input("N° de dossier", placeholder="ex : 2026/0123")
     submit_ch = st.form_submit_button("Créer le chantier", type="primary")
     if submit_ch:
       _u = st.session_state["users_db"].get(current_username)
@@ -1013,7 +1030,7 @@ elif page == "Chantiers" and current_role in projets_config.ROLES_CREATEURS_PROJ
         )
       else:
         ok, resultat = projets_config.creer_projet(
-            supabase, nom_ch, client_ch, current_username
+            supabase, nom_ch, client_ch, current_username, dossier_ch
         )
         if not ok:
           st.error(f"❌ {resultat}")
@@ -1036,6 +1053,106 @@ elif page == "Chantiers" and current_role in projets_config.ROLES_CREATEURS_PROJ
           st.session_state["projet_actif"] = nouveau_pid
           st.success(f"✅ Chantier « {nom_ch.strip()} » créé et sélectionné.")
           st.rerun()
+
+  # ---------------- Modification ----------------
+  _modifiables = [p for p in _mes if projets_config.peut_modifier_projet(_user, p)]
+  if _modifiables:
+    st.markdown("---")
+    st.subheader("✏️ Modifier un chantier")
+    pid_mod = st.selectbox(
+        "Chantier à modifier", _modifiables,
+        format_func=projets_config.libelle_projet, key="select_chantier_modif",
+    )
+    info_mod = _reg[pid_mod]
+    with st.form(f"modifier_chantier_form_{pid_mod}"):
+      nom_m = st.text_input("Nom du chantier", value=info_mod["nom"])
+      client_m = st.text_input("Client", value=info_mod["client"])
+      dossier_m = st.text_input("N° de dossier", value=info_mod.get("num_dossier") or "")
+      st.caption(f"Identifiant interne (non modifiable) : `{pid_mod}`")
+      submit_m = st.form_submit_button("Enregistrer les modifications")
+      if submit_m:
+        ok_m, msg_m = projets_config.modifier_projet(
+            supabase, pid_mod, nom_m, client_m, dossier_m
+        )
+        if ok_m:
+          try:
+            from audit_log import enregistrer_modification
+            enregistrer_modification(
+                supabase,
+                table_concernee="projets",
+                enregistrement_id=pid_mod,
+                action="MODIFICATION",
+                anciennes_valeurs={
+                    "nom": info_mod["nom"], "client": info_mod["client"],
+                    "num_dossier": info_mod.get("num_dossier") or "",
+                },
+                nouvelles_valeurs={
+                    "nom": nom_m.strip(), "client": client_m.strip(),
+                    "num_dossier": dossier_m.strip(),
+                },
+            )
+          except Exception:
+            pass
+          st.success(f"✅ {msg_m}")
+          st.rerun()
+        else:
+          st.error(f"❌ {msg_m}")
+
+  # ---------------- Suppression ----------------
+  _supprimables = [p for p in _mes if projets_config.peut_supprimer_projet(_user, p)]
+  if _supprimables:
+    st.markdown("---")
+    st.subheader("🗑️ Supprimer un chantier")
+    st.warning(
+        "⚠️ La suppression est **définitive** : le chantier, toutes ses fiches de"
+        " bétonnage et toutes ses éprouvettes sont effacés. L'accès est retiré à"
+        " tous les utilisateurs."
+    )
+    pid_del = st.selectbox(
+        "Chantier à supprimer", _supprimables,
+        format_func=projets_config.libelle_projet, key="select_chantier_suppr",
+    )
+    nb_bet, nb_ep = projets_config.compter_donnees_projet(supabase, pid_del)
+    st.info(
+        f"Ce chantier contient **{nb_bet if nb_bet is not None else '?'}** fiche(s) de"
+        f" bétonnage et **{nb_ep if nb_ep is not None else '?'}** éprouvette(s)."
+    )
+    nom_attendu = _reg[pid_del]["nom"]
+    confirmation = st.text_input(
+        f"Pour confirmer, tapez exactement le nom du chantier : {nom_attendu}",
+        key=f"confirm_suppr_{pid_del}",
+    )
+    if st.button(
+        "🗑️ Supprimer définitivement ce chantier", type="primary",
+        disabled=(confirmation.strip() != nom_attendu), key=f"btn_suppr_{pid_del}",
+    ):
+      info_del = dict(_reg[pid_del])
+      try:
+        from audit_log import enregistrer_modification
+        enregistrer_modification(
+            supabase,
+            table_concernee="projets",
+            enregistrement_id=pid_del,
+            action="SUPPRESSION",
+            anciennes_valeurs=info_del,
+            commentaire=(
+                f"Suppression du chantier avec {nb_bet} fiche(s) de bétonnage"
+                f" et {nb_ep} éprouvette(s)"
+            ),
+        )
+      except Exception:
+        pass
+      ok_d, msg_d = projets_config.supprimer_projet(supabase, pid_del)
+      if ok_d:
+        # Mettre à jour la session de l'utilisateur courant
+        st.session_state["users_db"] = load_users()
+        st.session_state["user"]["projets_autorises"] = [
+            p for p in st.session_state["user"].get("projets_autorises", []) if p != pid_del
+        ]
+        st.success(f"✅ {msg_d}")
+        st.rerun()
+      else:
+        st.error(f"❌ {msg_d}")
 
 elif page == "Suivi de Bétonnage":
   render_view(suivi_Betonnage, supabase)
