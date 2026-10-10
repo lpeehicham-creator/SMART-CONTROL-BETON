@@ -23,31 +23,11 @@ import projets_config
 # 1. GESTION UTILISATEURS & SUPABASE
 # ==============================================================================
 def connecter_utilisateur(supabase, nom_utilisateur, mot_de_passe):
-  """Vérifie l'utilisateur et récupère ses droits depuis la table 'users'."""
-  try:
-    res = (
-        supabase.table("users")
-        .select("*")
-        .eq("username", nom_utilisateur)
-        .eq("password", mot_de_passe)
-        .execute()
-    )
-    if res.data:
-      user_info = res.data[0]
-      st.session_state.update({
-          "user_logged": True,
-          "user": user_info,
-          "username": user_info.get("username"),
-          "role": user_info.get("role"),
-          "user_role": user_info.get("role"),
-          "can_edit": bool(user_info.get("can_edit", False)),
-      })
-      return True
-    st.error("Nom d'utilisateur ou mot de passe incorrect.")
-    return False
-  except Exception as e:
-    st.error(f"Erreur lors de la connexion : {e}")
-    return False
+  """Ancienne connexion directe (comparaison de mot de passe en clair dans la
+  table 'users') : DÉSACTIVÉE pour des raisons de sécurité. La seule connexion
+  valide est celle de app.py (mots de passe hachés, table app_users)."""
+  st.error("Connexion directe désactivée : utilisez l'application principale.")
+  return False
 
 
 def verifier_doublon_num_reception(
