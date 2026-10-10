@@ -98,7 +98,7 @@ def show(supabase):
         
         classe_beton = st.selectbox(
             "Classe", 
-            ["C25/30", "C30/37", "C35/45", "C40/50", "C45/55"],
+            ["C20/25","C25/30", "C30/37", "C35/45", "C40/50", "C45/55"],
             key="saisie_classe"
         )
         
