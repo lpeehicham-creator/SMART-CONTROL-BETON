@@ -1,10 +1,10 @@
 """
-Scan de bon de livraison (BL) de béton par un modèle de vision OpenAI.
+Scan de bon de livraison (BL) de béton par un modèle de vision Google Gemini.
 
 L'agent photographie (ou importe) le BL ; l'image est réduite, envoyée au
-modèle, qui renvoie les champs lus au format JSON. Les valeurs sont VALIDÉES
-puis proposées à l'agent, qui les applique au formulaire de saisie avant de
-vérifier et d'enregistrer lui-même.
+modèle Gemini, qui renvoie les champs lus au format JSON. Les valeurs sont
+VALIDÉES puis proposées à l'agent, qui les applique au formulaire de saisie
+avant de vérifier et d'enregistrer lui-même.
 
 Sécurité :
 - la clé API reste dans les secrets Streamlit (jamais dans le code ni côté navigateur) ;
@@ -13,10 +13,11 @@ Sécurité :
   ne peut donc ni donner d'ordre à l'application, ni injecter du code) ;
 - l'image n'est pas conservée par l'application.
 
-Secrets Streamlit reconnus :
-    OPENAI_API_KEY                (obligatoire ; ou [openai] API_KEY = "...")
-    OPENAI_MODEL_SCAN             (facultatif, défaut : gpt-4o-mini)
-    OPENAI_MODEL_SCAN_RENFORCE    (facultatif, défaut : gpt-4o)
+Secrets Streamlit reconnus (la casse n'a pas d'importance) :
+    GEMINI_API_KEY = "..."            (ou GOOGLE_API_KEY, ou [gemini] API_KEY = "...")
+    GEMINI_MODEL_SCAN                 (facultatif, défaut : gemini-3.8-flash)
+    GEMINI_MODEL_SCAN_RENFORCE        (facultatif, défaut : gemini-3.1-pro-preview)
+Dépendance : google-genai (requirements.txt).
 """
 
 import base64
@@ -24,15 +25,19 @@ import io
 import json
 import re
 from datetime import date, datetime, time, timedelta
+from time import sleep
 
 import streamlit as st
 
-MODELE_RAPIDE_DEFAUT = "gpt-4o-mini"
-MODELE_RENFORCE_DEFAUT = "gpt-4o"
+# Modèles essayés dans l'ordre (le suivant sert si le précédent est introuvable).
+# Les modèles évoluent vite : on peut les imposer avec les secrets ci-dessus.
+MODELES_RAPIDES_DEFAUT = ("gemini-3.8-flash", "gemini-3.5-flash")
+MODELES_RENFORCE_DEFAUT = ("gemini-3.1-pro-preview", "gemini-3.8-flash")
 CLASSES_BETON = ["C25/30", "C30/37", "C35/45", "C40/50", "C45/55"]
 TAILLE_MAX_IMAGE_OCTETS = 20 * 1024 * 1024
 COTE_MAX_PIXELS = 2048
 MAX_SCANS_PAR_SESSION = 30
+DELAI_MAX_MS = 60_000
 
 # (clé du résultat, clé du widget du formulaire, libellé affiché)
 CHAMPS_APPLIQUES = [
@@ -55,60 +60,23 @@ class ScanBLError(Exception):
 # ==============================================================================
 # 1. REQUÊTE AU MODÈLE
 # ==============================================================================
-_NULLABLE_STR = {"type": ["string", "null"]}
-_NULLABLE_NUM = {"type": ["number", "null"]}
-
-SCHEMA_BL = {
-    "name": "bon_livraison_beton",
-    "strict": True,
-    "schema": {
-        "type": "object",
-        "properties": {
-            "est_un_bon_de_livraison": {
-                "type": "boolean",
-                "description": "false si l'image n'est pas un bon de livraison de béton.",
-            },
-            "lisibilite": {"type": "string", "enum": ["bonne", "moyenne", "mauvaise"]},
-            "numero_bl": {**_NULLABLE_STR, "description": "Numéro du bon de livraison (N° BL / Bon n°)."},
-            "date_livraison": {
-                **_NULLABLE_STR,
-                "description": "Date de livraison au format AAAA-MM-JJ. Les dates du document sont jour/mois/année.",
-            },
-            "centrale_beton": {**_NULLABLE_STR, "description": "Nom de la centrale à béton / du fournisseur."},
-            "client": {**_NULLABLE_STR, "description": "Nom du client tel qu'imprimé sur le BL."},
-            "chantier": {**_NULLABLE_STR, "description": "Nom du chantier / projet tel qu'imprimé sur le BL."},
-            "ouvrage": {
-                **_NULLABLE_STR,
-                "description": "Partie d'ouvrage à bétonner (voile, semelle, dalle, poteau...).",
-            },
-            "classe_beton": {**_NULLABLE_STR, "description": "Classe de résistance, par exemple C25/30."},
-            "quantite_m3": {**_NULLABLE_NUM, "description": "Volume livré en m³ (nombre décimal avec un point)."},
-            "heure_depart_centrale": {
-                **_NULLABLE_STR,
-                "description": "Heure de fin de chargement / de départ de la centrale, HH:MM (24 h).",
-            },
-            "heure_arrivee_chantier": {
-                **_NULLABLE_STR,
-                "description": "Heure d'arrivée au chantier, HH:MM (24 h), si elle figure sur le BL.",
-            },
-            "affaissement_mm": {
-                **_NULLABLE_NUM,
-                "description": "Affaissement au cône d'Abrams en millimètres, UNIQUEMENT s'il est écrit en chiffres.",
-            },
-            "remarques": {
-                **_NULLABLE_STR,
-                "description": "Information utile non couverte ailleurs (immatriculation du camion, formule...). Court.",
-            },
-        },
-        "required": [
-            "est_un_bon_de_livraison", "lisibilite", "numero_bl", "date_livraison",
-            "centrale_beton", "client", "chantier", "ouvrage", "classe_beton",
-            "quantite_m3", "heure_depart_centrale", "heure_arrivee_chantier",
-            "affaissement_mm", "remarques",
-        ],
-        "additionalProperties": False,
-    },
-}
+# (nom, type, description) : source unique pour le schéma JSON ET la consigne écrite.
+CHAMPS_JSON = [
+    ("est_un_bon_de_livraison", "bool", "false si l'image n'est pas un bon de livraison de béton."),
+    ("lisibilite", "lisibilite", "bonne, moyenne ou mauvaise : lisibilité globale du document."),
+    ("numero_bl", "str", "Numéro du bon de livraison (N° BL / Bon n°)."),
+    ("date_livraison", "str", "Date de livraison au format AAAA-MM-JJ. Les dates du document sont jour/mois/année."),
+    ("centrale_beton", "str", "Nom de la centrale à béton / du fournisseur."),
+    ("client", "str", "Nom du client tel qu'imprimé sur le BL."),
+    ("chantier", "str", "Nom du chantier / projet tel qu'imprimé sur le BL."),
+    ("ouvrage", "str", "Partie d'ouvrage à bétonner (voile, semelle, dalle, poteau...)."),
+    ("classe_beton", "str", "Classe de résistance, par exemple C25/30."),
+    ("quantite_m3", "float", "Volume livré en m³ (nombre décimal avec un point)."),
+    ("heure_depart_centrale", "str", "Heure de fin de chargement / de départ de la centrale, HH:MM (24 h)."),
+    ("heure_arrivee_chantier", "str", "Heure d'arrivée au chantier, HH:MM (24 h), si elle figure sur le BL."),
+    ("affaissement_mm", "float", "Affaissement au cône d'Abrams en millimètres, UNIQUEMENT s'il est écrit en chiffres."),
+    ("remarques", "str", "Information utile non couverte ailleurs (immatriculation du camion, formule...). Court."),
+]
 
 CONSIGNES = (
     "Tu lis des bons de livraison (BL) de béton prêt à l'emploi sur des chantiers au Maroc. "
@@ -125,43 +93,83 @@ CONSIGNES = (
 )
 
 
-def _secret(nom, defaut=None):
+def _description_json():
+    """Consigne écrite décrivant l'objet JSON attendu (sert aussi quand le
+    schéma structuré n'est pas disponible)."""
+    lignes = ["Réponds uniquement par un objet JSON avec exactement ces clés :"]
+    for nom, typ, desc in CHAMPS_JSON:
+        genre = {"bool": "true/false", "lisibilite": '"bonne" | "moyenne" | "mauvaise"',
+                 "str": "texte ou null", "float": "nombre ou null"}[typ]
+        lignes.append(f'- "{nom}" ({genre}) : {desc}')
+    return "\n".join(lignes)
+
+
+def _modele_pydantic():
+    """Modèle pydantic décrivant la réponse (schéma structuré Gemini).
+    Retourne None si pydantic n'est pas disponible : on se rabat alors sur la
+    seule consigne écrite."""
     try:
-        valeur = st.secrets.get(nom)
+        from typing import Literal, Optional
+
+        from pydantic import Field, create_model
+    except ImportError:
+        return None
+    champs = {}
+    for nom, typ, desc in CHAMPS_JSON:
+        if typ == "bool":
+            champs[nom] = (bool, Field(description=desc))
+        elif typ == "lisibilite":
+            champs[nom] = (Literal["bonne", "moyenne", "mauvaise"], Field(description=desc))
+        elif typ == "float":
+            champs[nom] = (Optional[float], Field(default=None, description=desc))
+        else:
+            champs[nom] = (Optional[str], Field(default=None, description=desc))
+    try:
+        return create_model("BonLivraisonBeton", **champs)
     except Exception:
-        valeur = None
-    return valeur if valeur not in (None, "") else defaut
+        return None
 
 
-def _cle_openai():
+def _secrets_racine():
+    try:
+        return dict(st.secrets)
+    except Exception:
+        return {}
+
+
+def _secret(nom, defaut=None):
+    """Secret à la racine, sans tenir compte de la casse."""
+    for cle, valeur in _secrets_racine().items():
+        if str(cle).lower() == nom.lower() and valeur not in (None, ""):
+            return valeur
+    return defaut
+
+
+def _cle_gemini():
     """Clé API depuis les secrets Streamlit. Plusieurs écritures sont acceptées,
     sans tenir compte des majuscules/minuscules :
-        OPENAI_API_KEY = "sk-..."          (à la racine)
-        [openai]  API_KEY = "sk-..."       (dans un bloc, aussi api_key / key)
+        GEMINI_API_KEY = "..."  (ou GOOGLE_API_KEY, GOOGLE_GENAI_API_KEY, GENAI_API_KEY)
+        [gemini]  API_KEY = "..."   (bloc aussi nommé google / genai / google_genai)
     """
-    try:
-        racine = dict(st.secrets)
-    except Exception:
-        racine = {}
-
-    # 1. clé à la racine
+    racine = _secrets_racine()
+    noms_plats = ("gemini_api_key", "google_api_key", "google_genai_api_key", "genai_api_key", "gemini_key")
     for nom, valeur in racine.items():
-        if str(nom).lower() in ("openai_api_key", "openai_key") and isinstance(valeur, str) and valeur.strip():
+        if str(nom).lower() in noms_plats and isinstance(valeur, str) and valeur.strip():
             return valeur.strip()
 
-    # 2. clé dans un bloc [openai]
+    noms_blocs = ("gemini", "google", "genai", "google_genai")
+    noms_sous_cles = ("api_key", "apikey", "key") + noms_plats
     for nom, bloc in racine.items():
-        if str(nom).lower() == "openai" and hasattr(bloc, "items"):
+        if str(nom).lower() in noms_blocs and hasattr(bloc, "items"):
             for sous_nom, valeur in bloc.items():
-                if (str(sous_nom).lower() in ("api_key", "apikey", "key", "openai_api_key")
-                        and isinstance(valeur, str) and valeur.strip()):
+                if str(sous_nom).lower() in noms_sous_cles and isinstance(valeur, str) and valeur.strip():
                     return valeur.strip()
     return None
 
 
 def preparer_image(donnees):
     """Redresse (EXIF), réduit à 2048 px max et recompresse en JPEG : une photo
-    de smartphone (5 à 12 Mo) devient ~300 Ko, donc plus rapide et moins chère,
+    de smartphone (5 à 12 Mo) devient ~300 Ko, donc plus rapide à envoyer,
     sans perdre la lisibilité du texte. Retourne les octets JPEG."""
     if not donnees:
         raise ScanBLError("Aucune image reçue.")
@@ -189,74 +197,134 @@ def preparer_image(donnees):
         raise ScanBLError("Image illisible. Utilisez une photo au format JPG, PNG ou WebP.")
 
 
-def _appeler_modele(client, modele, messages, openai_mod):
-    """Appel en mode « JSON structuré strict », avec repli si le modèle ne
-    supporte pas un des paramètres (JSON strict, température)."""
-    essais = [
-        {"temperature": 0, "response_format": {"type": "json_schema", "json_schema": SCHEMA_BL}},
-        {"response_format": {"type": "json_schema", "json_schema": SCHEMA_BL}},
-        {"response_format": {"type": "json_object"}},
-    ]
-    derniere = None
-    for options in essais:
-        try:
-            reponse = client.chat.completions.create(model=modele, messages=messages, **options)
-            return reponse.choices[0].message.content
-        except openai_mod.BadRequestError as e:  # paramètre non supporté : on essaie plus simple
-            derniere = e
-            continue
-    raise derniere
+def _modeles_candidats(renforce):
+    perso = _secret("GEMINI_MODEL_SCAN_RENFORCE" if renforce else "GEMINI_MODEL_SCAN")
+    if perso:
+        return [str(perso).strip()]
+    return list(MODELES_RENFORCE_DEFAUT if renforce else MODELES_RAPIDES_DEFAUT)
+
+
+def _cle_refusee(code, message):
+    m = (message or "").lower()
+    return code in (401, 403) or "api key not valid" in m or "api_key_invalid" in m or (
+        "api key" in m and ("invalid" in m or "expired" in m)
+    )
+
+
+def _texte_reponse(reponse):
+    """Texte JSON de la réponse (avec messages clairs si elle est vide ou bloquée)."""
+    try:
+        texte = reponse.text
+    except Exception:
+        texte = None
+    if texte:
+        return texte
+    retour = getattr(reponse, "prompt_feedback", None)
+    if retour is not None and getattr(retour, "block_reason", None):
+        raise ScanBLError("L'image a été refusée par le filtre de sécurité de Google. Reprenez la photo.")
+    raise ScanBLError("Réponse vide de l'IA. Reprenez une photo plus nette et réessayez.")
+
+
+def _erreur_inattendue(e):
+    nom = type(e).__name__.lower()
+    if "timeout" in nom:
+        return ScanBLError("Le service Google a mis trop de temps à répondre. Réessayez.")
+    if "connect" in nom or "network" in nom:
+        return ScanBLError("Connexion à Google impossible. Vérifiez le réseau puis réessayez.")
+    return ScanBLError("Erreur inattendue pendant l'analyse. Réessayez.")
+
+
+def _generer(client, types, errors, modeles, image_part, invite):
+    """Appelle Gemini. Essaie, dans l'ordre : (1) schéma structuré + réflexion
+    courte, (2) schéma structuré, (3) JSON simple. Passe au modèle suivant si
+    le précédent est introuvable. Retourne (texte JSON, modèle utilisé)."""
+    pyd = _modele_pydantic()
+    variantes = []
+    if pyd is not None:
+        variantes.append({"thinking": True, "schema": pyd})
+        variantes.append({"schema": pyd})
+    variantes.append({})
+
+    dernier_refus = None
+    for modele in modeles:
+        for variante in variantes:
+            serveur = 0
+            while True:
+                try:
+                    options = {"system_instruction": CONSIGNES, "response_mime_type": "application/json"}
+                    if variante.get("schema") is not None:
+                        options["response_schema"] = variante["schema"]
+                    if variante.get("thinking"):
+                        options["thinking_config"] = types.ThinkingConfig(thinking_level="low")
+                    config = types.GenerateContentConfig(**options)
+                    reponse = client.models.generate_content(
+                        model=modele, contents=[image_part, invite], config=config
+                    )
+                    return _texte_reponse(reponse), modele
+                except ScanBLError:
+                    raise
+                except errors.APIError as e:
+                    code, message = getattr(e, "code", None), str(e)
+                    if _cle_refusee(code, message):
+                        raise ScanBLError(
+                            "Clé Gemini refusée : vérifiez la clé dans les secrets Streamlit et que "
+                            "l'API Gemini (Generative Language) est autorisée pour cette clé."
+                        )
+                    if code == 429:
+                        raise ScanBLError(
+                            "Quota Gemini atteint (limite du palier gratuit ou crédit épuisé). "
+                            "Patientez une minute ou vérifiez la facturation du projet Google."
+                        )
+                    if code == 404:          # modèle introuvable : modèle suivant
+                        dernier_refus = e
+                        break
+                    if isinstance(code, int) and code >= 500:
+                        serveur += 1
+                        if serveur <= 2:     # surcharge temporaire : on réessaie
+                            sleep(1.5 * serveur)
+                            continue
+                        raise ScanBLError("Le service Google est surchargé. Réessayez dans un instant.")
+                    dernier_refus = e        # 400 : paramètre non accepté, variante plus simple
+                    break
+                except (TypeError, ValueError) as e:  # réglage non reconnu par cette version du SDK
+                    dernier_refus = e
+                    break
+                except Exception as e:
+                    raise _erreur_inattendue(e)
+            if dernier_refus is not None and getattr(dernier_refus, "code", None) == 404:
+                break                        # inutile d'essayer les autres variantes de ce modèle
+    if dernier_refus is not None and getattr(dernier_refus, "code", None) == 404:
+        raise ScanBLError(
+            "Modèle Gemini introuvable. Indiquez un modèle valide avec le secret GEMINI_MODEL_SCAN."
+        )
+    raise ScanBLError("Requête refusée par Google (image ou paramètres non acceptés). Reprenez la photo.")
 
 
 def analyser_bon_livraison(donnees_image, modele_renforce=False):
-    """Envoie l'image au modèle de vision et retourne le résultat VALIDÉ
+    """Envoie l'image au modèle de vision Gemini et retourne le résultat VALIDÉ
     (voir normaliser_resultat). Lève ScanBLError avec un message clair."""
-    cle = _cle_openai()
+    cle = _cle_gemini()
     if not cle:
         raise ScanBLError(
-            "Clé OpenAI introuvable. Ajoutez le secret OPENAI_API_KEY dans les secrets Streamlit."
+            "Clé Gemini introuvable. Ajoutez le secret GEMINI_API_KEY dans les secrets Streamlit."
         )
     try:
-        import openai
+        from google import genai
+        from google.genai import errors, types
     except ImportError:
-        raise ScanBLError("Le paquet « openai » n'est pas installé : ajoutez openai>=1.0.0 à requirements.txt.")
+        raise ScanBLError("Le paquet « google-genai » n'est pas installé : ajoutez google-genai à requirements.txt.")
 
     jpeg = preparer_image(donnees_image)
-    url = "data:image/jpeg;base64," + base64.b64encode(jpeg).decode("ascii")
-    if modele_renforce:
-        modele = _secret("OPENAI_MODEL_SCAN_RENFORCE", MODELE_RENFORCE_DEFAUT)
-    else:
-        modele = _secret("OPENAI_MODEL_SCAN", MODELE_RAPIDE_DEFAUT)
-
-    messages = [
-        {"role": "system", "content": CONSIGNES + "\nRéponds uniquement en JSON, selon le schéma imposé."},
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": "Lis ce bon de livraison de béton et renseigne tous les champs."},
-                {"type": "image_url", "image_url": {"url": url, "detail": "high"}},
-            ],
-        },
-    ]
     try:
-        client = openai.OpenAI(api_key=cle, timeout=60, max_retries=2)
-        contenu = _appeler_modele(client, modele, messages, openai)
-    except openai.AuthenticationError:
-        raise ScanBLError("Clé OpenAI refusée : vérifiez la valeur du secret OPENAI_API_KEY.")
-    except openai.RateLimitError:
-        raise ScanBLError("Limite OpenAI atteinte (quota ou crédit épuisé). Vérifiez le compte OpenAI.")
-    except openai.NotFoundError:
-        raise ScanBLError(f"Modèle « {modele} » introuvable ou non autorisé pour cette clé.")
-    except openai.APITimeoutError:
-        raise ScanBLError("Le service OpenAI a mis trop de temps à répondre. Réessayez.")
-    except openai.APIConnectionError:
-        raise ScanBLError("Connexion à OpenAI impossible. Vérifiez le réseau puis réessayez.")
-    except openai.BadRequestError:
-        raise ScanBLError("Requête refusée par OpenAI (image ou paramètres non acceptés).")
-    except openai.APIError:
-        raise ScanBLError("Erreur du service OpenAI. Réessayez dans un instant.")
+        client = genai.Client(api_key=cle, http_options=types.HttpOptions(timeout=DELAI_MAX_MS))
+    except Exception:
+        client = genai.Client(api_key=cle)
+    image_part = types.Part.from_bytes(data=jpeg, mime_type="image/jpeg")
+    invite = "Lis ce bon de livraison de béton et renseigne tous les champs.\n" + _description_json()
 
+    contenu, modele = _generer(client, types, errors, _modeles_candidats(modele_renforce), image_part, invite)
     try:
+        contenu = re.sub(r"^\s*```(?:json)?\s*|\s*```\s*$", "", contenu.strip())
         brut = json.loads(contenu)
         if not isinstance(brut, dict):
             raise ValueError
@@ -471,15 +539,15 @@ def afficher_scan_bl(supabase=None, projet_id=None, client_projet="", nom_projet
         st.caption(
             "Prenez en photo ou importez le BL : l'IA lit les informations et pré-remplit le "
             "formulaire ci-dessous. **Vérifiez toujours les valeurs avant d'enregistrer.** "
-            "La photo est envoyée à OpenAI pour analyse et n'est pas conservée par l'application."
+            "La photo est envoyée à Google (Gemini) pour analyse et n'est pas conservée par l'application."
         )
 
         message = st.session_state.pop("_scan_bl_message", None)
         if message:
             st.success(message)
 
-        if not _cle_openai():
-            st.error("Le scan est indisponible : secret **OPENAI_API_KEY** introuvable dans les secrets Streamlit.")
+        if not _cle_gemini():
+            st.error("Le scan est indisponible : secret **GEMINI_API_KEY** introuvable dans les secrets Streamlit.")
             return
 
         mode = st.radio(
