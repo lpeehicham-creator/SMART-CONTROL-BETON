@@ -737,7 +737,7 @@ def afficher_module_validation_admin(supabase, est_admin=False, peut_valider=Fal
     if est_admin:
         st.info("💡 **Espace Administrateur BAALLAL** : vérifiez la conformité des écrasements et validez/signalez officiellement les PVs.")
     elif peut_valider:
-        st.info("✅ **Responsable de chantier** : vous pouvez modifier les forces d'écrasement, puis valider, rejeter et signer les PVs.")
+        st.info("✅ **Responsable de chantier** : vous pouvez valider, rejeter et signer les PVs.")
     else:
         st.info("👁️ **Mode consultation** : la validation officielle, le rejet et la signature des PVs sont réservés aux responsables de chantier (droit `can_edit`) et à l'administrateur.")
 
@@ -983,13 +983,6 @@ def afficher_module_validation_admin(supabase, est_admin=False, peut_valider=Fal
                     if new_force > 0 else 0.0
                 )
 
-    if peut_valider:
-        st.caption(
-            "✏️ Mode édition : la **Force (kN)** est modifiable"
-            " ci-dessous — la Résistance (MPa) se recalcule automatiquement."
-            " Les modifications sont enregistrées en même temps que la"
-            " décision de validation, plus bas."
-        )
 
     st.data_editor(
         st.session_state[df_key],
