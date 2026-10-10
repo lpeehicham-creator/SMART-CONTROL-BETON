@@ -104,7 +104,7 @@ def show(supabase):
         
     with col3:
         centrale = st.text_input("Centrale à Béton", value="TG PREFA", key="saisie_centrale")
-        meteo = st.selectbox("Météo", ["Ensoleillé ☀️", "Nuageux ☁️", "Pluie 🌧️"], key="saisie_meteo")
+        meteo = st.selectbox("Météo", ["Ensoleillé ☀️", "Nuageux ☁️", "Pluie 🌧️", "Nuit 🌙"], key="saisie_meteo")
         
         temp_beton = st.number_input("Température du Béton (°C)", value=20.0, step=0.1, format="%.1f", key="saisie_t_beton")
         temp_ambiante = st.number_input("Température Ambiante (°C)", value=25.0, step=0.1, format="%.1f", key="saisie_t_amb")
