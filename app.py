@@ -1006,6 +1006,9 @@ elif page == "Chantiers" and current_role in projets_config.ROLES_CREATEURS_PROJ
                 "Chantier": _reg[p]["nom"],
                 "Client": _reg[p]["client"],
                 "Identifiant": p,
+                "Signataires PV": " | ".join(
+                    f"{x['nom']} ({x['fonction']})" for x in _reg[p].get("signataires", [])
+                ) or "-",
                 "Créé par": _reg[p].get("cree_par") or "-",
             }
             for p in _mes
@@ -1028,6 +1031,20 @@ elif page == "Chantiers" and current_role in projets_config.ROLES_CREATEURS_PROJ
         placeholder="Texte complet affiché dans la case « Chantier » des PV",
         help="S'il est vide, le nom du chantier est utilisé sur les PV.",
     )
+    st.markdown("**✍️ Signataires des PV** — Nom et fonction")
+    st.caption(
+        "Les personnes qui signent les PV de ce chantier (1 à 3). "
+        "Les lignes sans nom sont ignorées."
+    )
+    signataires_ch = []
+    for _i, _f_def in enumerate(["Responsable d'essai", "Chef de laboratoire", "Coordinateur d'essai"]):
+      _cn, _cf = st.columns([3, 2])
+      _nom_s = _cn.text_input(f"Nom {_i + 1}", key=f"sig_nom_new_{_i}", placeholder="ex : A.ALAMI")
+      _fct_s = _cf.selectbox(
+          f"Fonction {_i + 1}", projets_config.FONCTIONS_SIGNATAIRES,
+          index=projets_config.FONCTIONS_SIGNATAIRES.index(_f_def), key=f"sig_fct_new_{_i}",
+      )
+      signataires_ch.append({"nom": _nom_s, "fonction": _fct_s})
     submit_ch = st.form_submit_button("Créer le chantier", type="primary")
     if submit_ch:
       if current_role != "admin" and not projets_config.compte_en_base(supabase, current_username):
@@ -1037,7 +1054,8 @@ elif page == "Chantiers" and current_role in projets_config.ROLES_CREATEURS_PROJ
         )
       else:
         ok, resultat = projets_config.creer_projet(
-            supabase, nom_ch, client_ch, current_username, dossier_ch, intitule_ch
+            supabase, nom_ch, client_ch, current_username, dossier_ch, intitule_ch,
+            signataires_ch
         )
         if not ok:
           st.error(f"❌ {resultat}")
@@ -1083,11 +1101,27 @@ elif page == "Chantiers" and current_role in projets_config.ROLES_CREATEURS_PROJ
           value=info_mod.get("intitule") or "",
           help="S'il est vide, le nom du chantier est utilisé sur les PV.",
       )
+      st.markdown("**✍️ Signataires des PV** — Nom et fonction")
+      _sig_exist = info_mod.get("signataires") or (
+          projets_config.SIGNATAIRES_LGV if pid_mod == projets_config.PROJET_PAR_DEFAUT else []
+      )
+      _f_defs = ["Responsable d'essai", "Chef de laboratoire", "Coordinateur d'essai"]
+      signataires_m = []
+      for _i in range(3):
+        _cur = _sig_exist[_i] if _i < len(_sig_exist) else {"nom": "", "fonction": _f_defs[_i]}
+        _cn, _cf = st.columns([3, 2])
+        _nom_s = _cn.text_input(f"Nom {_i + 1}", value=_cur["nom"], key=f"sig_nom_m_{pid_mod}_{_i}")
+        _fct_s = _cf.selectbox(
+            f"Fonction {_i + 1}", projets_config.FONCTIONS_SIGNATAIRES,
+            index=projets_config.FONCTIONS_SIGNATAIRES.index(_cur["fonction"]),
+            key=f"sig_fct_m_{pid_mod}_{_i}",
+        )
+        signataires_m.append({"nom": _nom_s, "fonction": _fct_s})
       st.caption(f"Identifiant interne (non modifiable) : `{pid_mod}`")
       submit_m = st.form_submit_button("Enregistrer les modifications")
       if submit_m:
         ok_m, msg_m = projets_config.modifier_projet(
-            supabase, pid_mod, nom_m, client_m, dossier_m, intitule_m
+            supabase, pid_mod, nom_m, client_m, dossier_m, intitule_m, signataires_m
         )
         if ok_m:
           try:
@@ -1100,10 +1134,12 @@ elif page == "Chantiers" and current_role in projets_config.ROLES_CREATEURS_PROJ
                 anciennes_valeurs={
                     "nom": info_mod["nom"], "client": info_mod["client"],
                     "num_dossier": info_mod.get("num_dossier") or "",
+                    "signataires": info_mod.get("signataires") or [],
                 },
                 nouvelles_valeurs={
                     "nom": nom_m.strip(), "client": client_m.strip(),
                     "num_dossier": dossier_m.strip(),
+                    "signataires": projets_config.nettoyer_signataires(signataires_m),
                 },
             )
           except Exception:
