@@ -421,17 +421,16 @@ def generer_pv_excel(export_data, infos_header):
   merge(row_comment, 2, row_comment, 8)
   set_cell(row_comment, 2, comment_valeur, bold=True, align="left")
 
+  # Cases de visa : signataires propres au chantier (créés avec le chantier)
+  visas_pv = projets_config.visas_pv()
+  cols_visa = projets_config.colonnes_visas(len(visas_pv))
   row_visa_titre = row_comment + 1
-  merge(row_visa_titre, 2, row_visa_titre, 4)
-  set_cell(row_visa_titre, 2, "Visa Responsable d'essai", bold=True)
-  merge(row_visa_titre, 6, row_visa_titre, 8)
-  set_cell(row_visa_titre, 6, "Visa Chef du laboratoire", bold=True)
-
   row_visa_nom = row_visa_titre + 1
-  merge(row_visa_nom, 2, row_visa_nom, 4)
-  set_cell(row_visa_nom, 2, "O.IKKEN", bold=True, align="center")
-  merge(row_visa_nom, 6, row_visa_nom, 8)
-  set_cell(row_visa_nom, 6, "H.BAALLAL", bold=True, align="center")
+  for (titre_v, nom_v), (c1_v, c2_v) in zip(visas_pv, cols_visa):
+    merge(row_visa_titre, c1_v, row_visa_titre, c2_v)
+    set_cell(row_visa_titre, c1_v, titre_v, bold=True)
+    merge(row_visa_nom, c1_v, row_visa_nom, c2_v)
+    set_cell(row_visa_nom, c1_v, nom_v, bold=True, align="center")
   ws.row_dimensions[row_visa_nom].height = 60
 
   logo_path = trouver_logo_lpee()
@@ -850,24 +849,28 @@ def generer_pv_pdf(export_data, infos_header):
   aligns.append((0, row_comment, 0, row_comment, "LEFT"))
   aligns.append((1, row_comment, 7, row_comment, "LEFT"))
 
-  r = blank_row()
-  r[1] = "Visa Responsable d'essai"
-  r[5] = "Visa Chef du laboratoire"
-  data.append(r)
-  row_visa_titre = len(data) - 1
-  spans += [(1, row_visa_titre, 3, row_visa_titre), (5, row_visa_titre, 7, row_visa_titre)]
-  fonts.append((1, row_visa_titre, 3, row_visa_titre, "Helvetica-Bold", 8.5, BLACK))
-  fonts.append((5, row_visa_titre, 7, row_visa_titre, "Helvetica-Bold", 8.5, BLACK))
+  # Cases de visa : signataires propres au chantier (créés avec le chantier)
+  visas_pv = projets_config.visas_pv()
+  cols_visa = [(a_ - 1, b_ - 1) for a_, b_ in projets_config.colonnes_visas(len(visas_pv))]
 
   r = blank_row()
-  r[1] = "O.IKKEN"
-  r[5] = "H.BAALLAL"
+  for (titre_v, _nom_v), (c1_v, _c2_v) in zip(visas_pv, cols_visa):
+    r[c1_v] = titre_v
+  data.append(r)
+  row_visa_titre = len(data) - 1
+  for (c1_v, c2_v) in cols_visa:
+    spans.append((c1_v, row_visa_titre, c2_v, row_visa_titre))
+    fonts.append((c1_v, row_visa_titre, c2_v, row_visa_titre, "Helvetica-Bold", 8.5, BLACK))
+
+  r = blank_row()
+  for (_titre_v, nom_v), (c1_v, _c2_v) in zip(visas_pv, cols_visa):
+    r[c1_v] = nom_v
   data.append(r)
   row_visa_nom = len(data) - 1
-  spans += [(1, row_visa_nom, 3, row_visa_nom), (5, row_visa_nom, 7, row_visa_nom)]
-  fonts.append((1, row_visa_nom, 3, row_visa_nom, "Helvetica-Bold", 9, BLACK))
-  fonts.append((5, row_visa_nom, 7, row_visa_nom, "Helvetica-Bold", 9, BLACK))
-  valigns += [(1, row_visa_nom, 3, row_visa_nom, "TOP"), (5, row_visa_nom, 7, row_visa_nom, "TOP")]
+  for (c1_v, c2_v) in cols_visa:
+    spans.append((c1_v, row_visa_nom, c2_v, row_visa_nom))
+    fonts.append((c1_v, row_visa_nom, c2_v, row_visa_nom, "Helvetica-Bold", 9, BLACK))
+    valigns.append((c1_v, row_visa_nom, c2_v, row_visa_nom, "TOP"))
 
   rows_auto_hauteur = {row6, row7, row9, row10, row11, row_comment}
   row_heights = []
