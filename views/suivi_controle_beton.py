@@ -721,8 +721,11 @@ def _etat_validation_lot(eprouvettes):
     return {"statut_pv": None}
 
 
-def afficher_module_validation_admin(supabase, est_admin=False):
-    """Affiche le module d'approbation administrative et de signature des PVs."""
+def afficher_module_validation_admin(supabase, est_admin=False, peut_valider=False):
+    """Affiche le module d'approbation administrative et de signature des PVs.
+    est_admin : droits complets (correction des forces, PV déjà validés).
+    peut_valider : responsables de chantier (can_edit) autorisés à valider/rejeter/signer."""
+    peut_valider = bool(peut_valider or est_admin)
     st.subheader("🛡️ 3. Validation & Consultation des PVs")
 
     projet_id_actif = projets_config.projet_actif(st.session_state.get("user") or {})
@@ -732,8 +735,10 @@ def afficher_module_validation_admin(supabase, est_admin=False):
 
     if est_admin:
         st.info("💡 **Espace Administrateur BAALLAL** : vérifiez la conformité des écrasements et validez/signalez officiellement les PVs.")
+    elif peut_valider:
+        st.info("✅ **Responsable de chantier** : vous pouvez valider, rejeter et signer les PVs. La modification des forces d'écrasement reste réservée à l'administrateur BAALLAL.")
     else:
-        st.info("👁️ **Mode consultation** : cette phase est ouverte aux utilisateurs connectés. La validation officielle, le rejet, la signature et la modification des résultats sont réservés à l'administrateur BAALLAL.")
+        st.info("👁️ **Mode consultation** : la validation officielle, le rejet et la signature des PVs sont réservés aux responsables de chantier (droit `can_edit`) et à l'administrateur.")
 
     try:
         res = supabase.table("suivi_controle_beton").select("*").eq("projet_id", projet_id_actif).not_.is_("force_kn", "null").gt("force_kn", 0).order("id", desc=True).execute()
@@ -776,7 +781,13 @@ def afficher_module_validation_admin(supabase, est_admin=False):
         statut_lot = info_b.get("statut_pv") or "⏳ En attente de validation"
         ref_ctrl = determiner_ref_controle(supabase, b_id, info_b, list_ep[0])
         bl_num = extraire_num_bl(list_ep[0], info_b or {})
-        label = f"Réf: {ref_ctrl} | Échéance: {ech_lot} | BL: {bl_num} | Ouvrage: {list_ep[0].get('ouvrage', '-')} | Statut: {statut_lot}"
+        classe_lot = (
+            list_ep[0].get("classe_beton")
+            or (info_parent or {}).get("classe_beton")
+            or (info_parent or {}).get("classe")
+            or "-"
+        )
+        label = f"Réf: {ref_ctrl} | Échéance: {ech_lot} | BL: {bl_num} | Ouvrage: {list_ep[0].get('ouvrage', '-')} | Classe: {classe_lot} | Statut: {statut_lot}"
         entree = (label, (b_id, ech_lot), list_ep, info_b)
         if _est_pv_deja_valide(statut_lot):
             lots_deja_valides.append(entree)
@@ -1036,8 +1047,8 @@ def afficher_module_validation_admin(supabase, est_admin=False):
             st.caption("Aucun écrasement à 7 jours n'a encore été enregistré pour ce lot.")
 
     st.markdown("---")
-    if not est_admin:
-        st.warning("🔐 **Validation officielle désactivée pour votre compte.** Seul l'administrateur **BAALLAL** peut enregistrer une décision, modifier les forces ou signer le PV.")
+    if not peut_valider:
+        st.warning("🔐 **Validation officielle désactivée pour votre compte.** Seuls les responsables de chantier (droit `can_edit`) et l'administrateur peuvent enregistrer une décision et signer le PV.")
         st.markdown("### 📄 Statut du PV")
         st.write(info_b_sel.get("statut_pv", "⏳ En attente de validation"))
         if info_b_sel.get("visa_resp"):
@@ -1100,7 +1111,7 @@ def afficher_module_validation_admin(supabase, est_admin=False):
                     )
 
                     df_edit = st.session_state.get(df_key)
-                    if df_edit is not None:
+                    if df_edit is not None and est_admin:  # forces modifiables par l'admin uniquement
                         for _, r in df_edit.iterrows():
                             try:
                                 ep_id_maj = int(r["ID"])
@@ -1133,7 +1144,7 @@ def afficher_module_validation_admin(supabase, est_admin=False):
                 except Exception as e:
                     st.error(f"❌ Erreur lors de la mise à jour du statut : {e}")
 
-    if est_admin:
+    if peut_valider:
         afficher_historique_modifications(supabase, "suivi_controle_beton", ep_sel_list[0]["id"])
 
 
@@ -2419,7 +2430,7 @@ def show(supabase):
     # =========================================================
     elif onglet_courant == OPTIONS_ONGLETS[3]:
         est_admin_pv = is_baallal_admin
-        afficher_module_validation_admin(supabase, est_admin=est_admin_pv)
+        afficher_module_validation_admin(supabase, est_admin=est_admin_pv, peut_valider=bool(can_edit))
 
 
 # =========================================================
