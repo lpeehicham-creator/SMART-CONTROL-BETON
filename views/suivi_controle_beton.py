@@ -1580,8 +1580,25 @@ def show(supabase):
                         f"{e.get('repere_eprouvette') or '-'} — {e.get('echeance') or '-'} (prévu {e.get('date_ecrasement') or '-'})": e
                         for e in eps_lot_rapide
                     }
-                    reperes_sel = st.multiselect("2️⃣ Éprouvettes à modifier", list(labels_rapide.keys()), key=f"rapide_eps_{lot_rapide_sel}")
-                    nouvelle_ech = st.selectbox("3️⃣ Nouvelle échéance", ["3 jours", "7 jours", "28 jours", "90 jours"], index=2, key="rapide_nouvelle_ech")
+                    tout_lot = st.checkbox("Sélectionner toutes les éprouvettes du lot", key=f"rapide_tout_{lot_rapide_sel}")
+                    reperes_sel = st.multiselect(
+                        "2️⃣ Éprouvettes à modifier", list(labels_rapide.keys()),
+                        default=list(labels_rapide.keys()) if tout_lot else [],
+                        key=f"rapide_eps_{lot_rapide_sel}_{tout_lot}",
+                    )
+                    mode_reprog = st.radio(
+                        "3️⃣ Nouvelle programmation",
+                        ["Nombre de jours (libre)", "Date précise d'écrasement"],
+                        horizontal=True, key="rapide_mode_reprog",
+                    )
+                    nb_jours_libre, date_precise = None, None
+                    if mode_reprog == "Nombre de jours (libre)":
+                        nb_jours_libre = st.number_input(
+                            "Nombre de jours après la coulée (ex : 2, 10, 20, 28…)",
+                            min_value=1, max_value=365, value=28, step=1, key="rapide_nb_jours",
+                        )
+                    else:
+                        date_precise = st.date_input("Date d'écrasement souhaitée", key="rapide_date_precise")
                     if st.button("✅ Appliquer la nouvelle échéance", type="primary", key="btn_rapide_ech", disabled=not reperes_sel):
                         nb_ok_r = 0
                         for lab_r in reperes_sel:
@@ -1592,10 +1609,18 @@ def show(supabase):
                                 dt_coulee_r = extraire_date_coulee(parent_r) if parent_r else ""
                             try:
                                 dt_c_r = datetime.strptime(dt_coulee_r[:10], "%Y-%m-%d").date()
-                                nouvelle_date_r = str(dt_c_r + timedelta(days=extraire_nb_jours(nouvelle_ech, default=28)))
                             except (ValueError, TypeError):
                                 st.error(f"Date de coulée invalide pour {e_r.get('repere_eprouvette')} : impossible de recalculer.")
                                 continue
+                            if date_precise is not None:
+                                nb_j_r = (date_precise - dt_c_r).days
+                                if nb_j_r < 1:
+                                    st.error(f"{e_r.get('repere_eprouvette')} : la date choisie doit être postérieure à la date de coulée ({dt_c_r}).")
+                                    continue
+                            else:
+                                nb_j_r = int(nb_jours_libre)
+                            nouvelle_ech = f"{nb_j_r} jours"
+                            nouvelle_date_r = str(dt_c_r + timedelta(days=nb_j_r))
                             pay_r = {"echeance": nouvelle_ech, "date_ecrasement": nouvelle_date_r}
                             try:
                                 supabase.table("suivi_controle_beton").update(pay_r).eq("id", e_r["id"]).execute()
@@ -1612,7 +1637,7 @@ def show(supabase):
                             except Exception as err_r:
                                 st.error(f"Erreur pour #{e_r.get('id')} : {err_r}")
                         if nb_ok_r:
-                            st.success(f"✅ {nb_ok_r} éprouvette(s) passée(s) à {nouvelle_ech}.")
+                            st.success(f"✅ {nb_ok_r} éprouvette(s) reprogrammée(s) avec succès.")
                             st.rerun()
                     st.markdown("---")
 
@@ -1663,7 +1688,9 @@ def show(supabase):
                             "id": st.column_config.NumberColumn("ID", disabled=True),
                             "betonnage_id": None,
                             "ref_controle": st.column_config.TextColumn("Réf. Contrôle (N° Réception)"),
-                            "echeance": st.column_config.SelectboxColumn("Échéance Visée", options=["3 jours", "7 jours", "28 jours", "90 jours"]),
+                            "echeance": st.column_config.SelectboxColumn("Échéance Visée", options=sorted(
+                                {"3 jours", "7 jours", "28 jours", "90 jours"} | {str(v) for v in df_display_prog["echeance"].dropna().unique()},
+                                key=lambda x: extraire_nb_jours(x, default=0))),
                             "date_coulee": st.column_config.TextColumn("Date Coulée"),
                             "date_ecrasement": st.column_config.TextColumn(
                                 "Date Écrasement Prévue",
