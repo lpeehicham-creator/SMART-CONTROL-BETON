@@ -723,9 +723,10 @@ def _etat_validation_lot(eprouvettes):
 
 def afficher_module_validation_admin(supabase, est_admin=False, peut_valider=False):
     """Affiche le module d'approbation administrative et de signature des PVs.
-    est_admin : droits complets (correction des forces, PV déjà validés).
-    peut_valider : responsables de chantier (can_edit) autorisés à valider/rejeter/signer."""
+    peut_valider : responsables de chantier (can_edit) et admin : validation, signature
+    et modification des forces d'écrasement (y compris sur PV déjà validé)."""
     peut_valider = bool(peut_valider or est_admin)
+    utilisateur_corr = str(st.session_state.get("username") or (st.session_state.get("user") or {}).get("username") or "utilisateur")
     st.subheader("🛡️ 3. Validation & Consultation des PVs")
 
     projet_id_actif = projets_config.projet_actif(st.session_state.get("user") or {})
@@ -736,7 +737,7 @@ def afficher_module_validation_admin(supabase, est_admin=False, peut_valider=Fal
     if est_admin:
         st.info("💡 **Espace Administrateur BAALLAL** : vérifiez la conformité des écrasements et validez/signalez officiellement les PVs.")
     elif peut_valider:
-        st.info("✅ **Responsable de chantier** : vous pouvez valider, rejeter et signer les PVs. La modification des forces d'écrasement reste réservée à l'administrateur BAALLAL.")
+        st.info("✅ **Responsable de chantier** : vous pouvez modifier les forces d'écrasement, puis valider, rejeter et signer les PVs.")
     else:
         st.info("👁️ **Mode consultation** : la validation officielle, le rejet et la signature des PVs sont réservés aux responsables de chantier (droit `can_edit`) et à l'administrateur.")
 
@@ -794,8 +795,8 @@ def afficher_module_validation_admin(supabase, est_admin=False, peut_valider=Fal
         else:
             options_valid.append(entree)
 
-    if est_admin and lots_deja_valides:
-        with st.expander("🔓 Corriger un PV déjà validé (charge de rupture) — BAALLAL uniquement"):
+    if peut_valider and lots_deja_valides:
+        with st.expander("🔓 Corriger un PV déjà validé (charge de rupture) — Responsables de chantier"):
             st.warning(
                 "⚠️ Cette section permet de corriger la force d'écrasement d'un"
                 " PV **déjà validé et signé**, par exemple suite à une erreur de"
@@ -901,7 +902,7 @@ def afficher_module_validation_admin(supabase, est_admin=False, peut_valider=Fal
                                 action="MODIFICATION",
                                 anciennes_valeurs=anciennes_dv,
                                 nouvelles_valeurs=nouvelles_dv,
-                                commentaire=f"Correction post-validation par BAALLAL — motif : {motif_correction.strip()}",
+                                commentaire=f"Correction post-validation par {utilisateur_corr} — motif : {motif_correction.strip()}",
                             )
                             nb_ok += 1
                         except Exception as e_dv:
@@ -982,9 +983,9 @@ def afficher_module_validation_admin(supabase, est_admin=False, peut_valider=Fal
                     if new_force > 0 else 0.0
                 )
 
-    if est_admin:
+    if peut_valider:
         st.caption(
-            "✏️ Mode administrateur : la **Force (kN)** est modifiable"
+            "✏️ Mode édition : la **Force (kN)** est modifiable"
             " ci-dessous — la Résistance (MPa) se recalcule automatiquement."
             " Les modifications sont enregistrées en même temps que la"
             " décision de validation, plus bas."
@@ -1003,7 +1004,7 @@ def afficher_module_validation_admin(supabase, est_admin=False, peut_valider=Fal
             "Échéance": st.column_config.TextColumn("Échéance", disabled=True),
             "Date Écrasement": st.column_config.TextColumn("Date Écrasement", disabled=True),
             "Force (kN)": st.column_config.NumberColumn(
-                "⚡ Force (kN)", disabled=not est_admin,
+                "⚡ Force (kN)", disabled=not peut_valider,
                 min_value=0.0, max_value=3000.0, step=0.1, format="%.1f",
             ),
             "Résistance (MPa)": st.column_config.NumberColumn("Résistance (MPa)", disabled=True, format="%.1f"),
@@ -1111,7 +1112,7 @@ def afficher_module_validation_admin(supabase, est_admin=False, peut_valider=Fal
                     )
 
                     df_edit = st.session_state.get(df_key)
-                    if df_edit is not None and est_admin:  # forces modifiables par l'admin uniquement
+                    if df_edit is not None and peut_valider:
                         for _, r in df_edit.iterrows():
                             try:
                                 ep_id_maj = int(r["ID"])
