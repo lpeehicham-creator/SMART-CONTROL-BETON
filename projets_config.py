@@ -7,6 +7,7 @@ depuis la plateforme. Le registre est gardé dans st.session_state (jamais
 dans une variable globale du module, partagée entre tous les utilisateurs).
 """
 
+import json
 import re
 import unicodedata
 
@@ -21,6 +22,47 @@ _PROJETS_REPLI = {
 }
 
 ROLES_CREATEURS_PROJET = ("admin", "responsable_chantier")
+
+# ------------------------------------------------------------------------------
+# SIGNATAIRES DES PV (propres à chaque chantier)
+# ------------------------------------------------------------------------------
+FONCTIONS_SIGNATAIRES = ("Chef de laboratoire", "Responsable d'essai", "Coordinateur d'essai")
+MAX_SIGNATAIRES = 3
+# Intitulé de la case de visa sur le PV (celui de « Chef de laboratoire » est
+# conservé tel qu'il figurait déjà sur les PV de LGV CASA SUD)
+_TITRES_VISA = {
+    "Chef de laboratoire": "Visa Chef du laboratoire",
+    "Responsable d'essai": "Visa Responsable d'essai",
+    "Coordinateur d'essai": "Visa Coordinateur d'essai",
+}
+# Ordre d'affichage sur le PV, de gauche à droite
+_ORDRE_VISA = ("Responsable d'essai", "Coordinateur d'essai", "Chef de laboratoire")
+# Signataires historiques de LGV CASA SUD (repris tant qu'aucun n'est enregistré)
+SIGNATAIRES_LGV = [
+    {"nom": "O.IKKEN", "fonction": "Responsable d'essai"},
+    {"nom": "H.BAALLAL", "fonction": "Chef de laboratoire"},
+]
+
+
+def nettoyer_signataires(brut):
+    """Liste [{"nom", "fonction"}] valide (nom non vide, fonction reconnue,
+    3 maximum). Accepte une liste ou un JSON sous forme de texte."""
+    if isinstance(brut, str):
+        try:
+            brut = json.loads(brut)
+        except Exception:
+            return []
+    if not isinstance(brut, list):
+        return []
+    res = []
+    for e in brut:
+        if not isinstance(e, dict):
+            continue
+        nom = str(e.get("nom") or "").strip()
+        fonction = str(e.get("fonction") or "").strip()
+        if nom and fonction in FONCTIONS_SIGNATAIRES:
+            res.append({"nom": nom, "fonction": fonction})
+    return res[:MAX_SIGNATAIRES]
 
 
 # ==============================================================================
@@ -44,6 +86,7 @@ def charger_projets(supabase, force=False):
                     "client": row.get("client") or "-",
                     "num_dossier": row.get("num_dossier") or "",
                     "intitule": row.get("intitule") or "",
+                    "signataires": nettoyer_signataires(row.get("signataires")),
                     "cree_par": row.get("cree_par"),
                 }
     except Exception:
@@ -76,7 +119,7 @@ def _slug_projet(nom):
     return s[:40]
 
 
-def creer_projet(supabase, nom, client, createur, num_dossier="", intitule=""):
+def creer_projet(supabase, nom, client, createur, num_dossier="", intitule="", signataires=None):
     """Crée un chantier. Retourne (True, projet_id) ou (False, message).
     Réservé aux rôles admin / responsable_chantier (vérifié ici, pas
     seulement dans l'interface)."""
@@ -87,12 +130,16 @@ def creer_projet(supabase, nom, client, createur, num_dossier="", intitule=""):
     client = (client or "").strip()
     num_dossier = (num_dossier or "").strip()
     intitule = (intitule or "").strip()
+    signataires = nettoyer_signataires(signataires)
     if len(nom) < 3:
         return False, "Le nom du chantier doit contenir au moins 3 caractères."
     if not client:
         return False, "Le client est obligatoire."
     if not num_dossier:
         return False, "Le N° de dossier est obligatoire."
+    if not signataires:
+        return False, ("Indiquez au moins une personne qui signe les PV "
+                       "(nom et fonction).")
     pid = _slug_projet(nom)
     if not pid:
         return False, "Nom de chantier invalide."
@@ -112,11 +159,12 @@ def creer_projet(supabase, nom, client, createur, num_dossier="", intitule=""):
                            " (créé par une autre personne). Choisissez un autre nom.")
         ligne = {"id": pid, "nom": nom, "client": client, "num_dossier": num_dossier,
                  "cree_par": createur, "actif": True}
+        ligne["signataires"] = signataires
         if intitule:  # colonne facultative : n'est envoyée que si renseignée
             ligne["intitule"] = intitule
         supabase.table("projets").insert(ligne).execute()
     except Exception as e:
-        return False, f"Erreur Supabase : {e}"
+        return False, _msg_erreur_projets(e)
     charger_projets(supabase, force=True)
     return True, pid
 
@@ -226,6 +274,40 @@ def dossier_pv(defaut_lgv, projet_id=None):
     return defaut_lgv if pid == PROJET_PAR_DEFAUT else "-"
 
 
+def _signataires_effectifs(projet_id=None):
+    pid = projet_id or projet_actif(st.session_state.get("user") or {})
+    info = get_projets().get(pid) or {}
+    sig = info.get("signataires") or []
+    if sig:
+        return sig
+    if pid == PROJET_PAR_DEFAUT:
+        return SIGNATAIRES_LGV
+    # Chantier sans signataire enregistré : cases de visa vides (à signer à
+    # la main) plutôt que les noms d'un autre chantier.
+    return [{"nom": "", "fonction": "Responsable d'essai"},
+            {"nom": "", "fonction": "Chef de laboratoire"}]
+
+
+def visas_pv(projet_id=None):
+    """Cases de visa du PV, de gauche à droite : liste de (titre, nom)."""
+    ordre = {f: i for i, f in enumerate(_ORDRE_VISA)}
+    tri = sorted(_signataires_effectifs(projet_id), key=lambda e: ordre.get(e["fonction"], 9))
+    return [(_TITRES_VISA[e["fonction"]], e["nom"]) for e in tri]
+
+
+def colonnes_visas(n):
+    """Colonnes Excel (1 à 8, début-fin) occupées par n cases de visa."""
+    return {1: [(3, 6)], 2: [(2, 4), (6, 8)], 3: [(1, 2), (4, 5), (7, 8)]}[max(1, min(n, 3))]
+
+
+def nom_signataire(fonction, projet_id=None):
+    """Nom du signataire ayant cette fonction sur le chantier ('' si aucun)."""
+    for e in _signataires_effectifs(projet_id):
+        if e["fonction"] == fonction:
+            return e["nom"]
+    return ""
+
+
 def nom_projet(projet_id):
     """Libellé lisible d'un identifiant de projet (pour affichage)."""
     info = get_projets().get(projet_id)
@@ -284,12 +366,20 @@ def peut_supprimer_projet(user_info, projet_id):
     )
 
 
+def _msg_erreur_projets(e):
+    txt = str(e)
+    if "signataires" in txt or "intitule" in txt or "num_dossier" in txt:
+        return ("Colonne manquante dans la table `projets` : exécutez le script "
+                f"ajout_table_projets.sql dans Supabase. ({txt})")
+    return f"Erreur Supabase : {txt}"
+
+
 def _projet_en_base(supabase, projet_id):
     res = supabase.table("projets").select("id").eq("id", projet_id).execute()
     return bool(res.data)
 
 
-def modifier_projet(supabase, projet_id, nom, client, num_dossier, intitule=""):
+def modifier_projet(supabase, projet_id, nom, client, num_dossier, intitule="", signataires=None):
     """Modifie nom, client et N° de dossier. L'identifiant ne change jamais
     (les données y sont rattachées). Retourne (ok, message)."""
     user = st.session_state.get("user") or {}
@@ -303,6 +393,11 @@ def modifier_projet(supabase, projet_id, nom, client, num_dossier, intitule=""):
         return False, "Le client est obligatoire."
     if not num_dossier:
         return False, "Le N° de dossier est obligatoire."
+    if signataires is not None:
+        signataires = nettoyer_signataires(signataires)
+        if not signataires:
+            return False, ("Indiquez au moins une personne qui signe les PV "
+                           "(nom et fonction).")
     try:
         if not _projet_en_base(supabase, projet_id):
             return False, ("Ce chantier n'est pas enregistré dans la table `projets` "
@@ -310,9 +405,12 @@ def modifier_projet(supabase, projet_id, nom, client, num_dossier, intitule=""):
         valeurs = {"nom": nom, "client": client, "num_dossier": num_dossier}
         if intitule != ((get_projets().get(projet_id) or {}).get("intitule") or ""):
             valeurs["intitule"] = intitule or None  # seulement si modifié
+        if signataires is not None and signataires != (
+                (get_projets().get(projet_id) or {}).get("signataires") or []):
+            valeurs["signataires"] = signataires
         supabase.table("projets").update(valeurs).eq("id", projet_id).execute()
     except Exception as e:
-        return False, f"Erreur Supabase : {e}"
+        return False, _msg_erreur_projets(e)
     charger_projets(supabase, force=True)
     return True, "Chantier mis à jour."
 
