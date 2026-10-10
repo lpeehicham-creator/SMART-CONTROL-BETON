@@ -810,7 +810,7 @@ def generer_pv_pdf(export_data, infos_header):
   )
   if not a_des_28j or est_en_cours_28j or moyenne_28j_val is None:
     comment_valeur = (
-        "PERFORMANCES MECANIQUES A 28 JOURS SERONT DONNES ULTERIEUREMENT."
+        "LES PERFORMANCES MÉCANIQUES À 28 JOURS SERONT COMMUNIQUÉES ULTÉRIEUREMENT.."
     )
   elif moyenne_28j_val >= seuil:
     comment_valeur = "PERFORMANCES MECANIQUES A 28 JOURS SONT CONFORMES"
