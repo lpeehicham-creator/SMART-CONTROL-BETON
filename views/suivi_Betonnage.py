@@ -325,7 +325,7 @@ def show(supabase):
                             new_heure_fin = st.time_input("Heure de fin de production", value=def_h_fin, key=f"edit_h_fin_{rec_id}")
                             new_heure_arrivee = st.time_input("Heure d'arrivée au chantier", value=def_h_arr, key=f"edit_h_arr_{rec_id}")
                             
-                            classes_list = ["C25/30", "C30/37", "C35/45", "C40/50", "C45/55"]
+                            classes_list = ["C20/25 "C25/30", "C30/37", "C35/45", "C40/50", "C45/55"]
                             current_classe = selected_item.get("classe_beton", "C25/30")
                             idx_classe = classes_list.index(current_classe) if current_classe in classes_list else 0
                             new_classe = st.selectbox("Classe", classes_list, index=idx_classe, key=f"edit_classe_{rec_id}")
