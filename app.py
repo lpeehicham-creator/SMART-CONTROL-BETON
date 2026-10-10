@@ -561,6 +561,7 @@ with st.sidebar:
     available_pages = [
         "Accueil",
         "Chantiers",
+        "Mon équipe",
         "Suivi Contrôle Béton",
         "Historique Complet & PVs",
         "Suivi de Bétonnage",
@@ -1204,6 +1205,148 @@ elif page == "Chantiers" and current_role in projets_config.ROLES_CREATEURS_PROJ
         st.rerun()
       else:
         st.error(f"❌ {msg_d}")
+
+elif page == "Mon équipe" and current_role == "responsable_chantier":
+  st.title("👥 Mon équipe")
+  _flash = st.session_state.pop("flash_equipe", None)
+  if _flash:
+    st.success(_flash)
+  _user = st.session_state["user"]
+  _gerables = projets_config.projets_gerables(_user)
+  _reserves = set(DEFAULT_USERS.keys()) | {"ADMIN", "USER"}
+  _roles_eq = projets_config.ROLES_EQUIPE
+
+  if not _gerables:
+    st.info("Aucun chantier à gérer. Créez d'abord un chantier dans la page « Chantiers ».")
+  else:
+    _actif = projets_config.projet_actif(_user)
+    pid_eq = st.selectbox(
+        "Chantier", _gerables,
+        index=_gerables.index(_actif) if _actif in _gerables else 0,
+        format_func=projets_config.libelle_projet, key="select_equipe_chantier",
+    )
+    st.caption(
+        "Les personnes de votre équipe ne voient que les données des chantiers auxquels"
+        " vous leur donnez accès. Vous ne pouvez gérer que les comptes de vos propres chantiers."
+    )
+
+    membres = projets_config.lister_equipe(supabase, pid_eq)
+    if membres:
+      st.dataframe(
+          [
+              {
+                  "Utilisateur": m["username"],
+                  "Rôle": (
+                      "Responsable de chantier" if m["role"] == "responsable_chantier"
+                      else _roles_eq.get(m["role"], m["role"])
+                  ),
+                  "Droit de modification": "Oui" if m["can_edit"] else "Non",
+                  "Autres chantiers": "Oui" if m["partage"] else "Non",
+              }
+              for m in membres
+          ],
+          use_container_width=True, hide_index=True,
+      )
+    else:
+      st.info("Aucun membre pour ce chantier pour le moment.")
+
+    # ---------------- Nouveau membre ----------------
+    st.markdown("---")
+    st.subheader("➕ Ajouter une personne à ce chantier")
+    with st.form(f"form_ajout_membre_{pid_eq}", clear_on_submit=True):
+      nm = st.text_input("Nom d'utilisateur", placeholder="ex : A.ALAMI")
+      pw = st.text_input("Mot de passe (6 caractères minimum)", type="password")
+      rl = st.selectbox("Rôle", list(_roles_eq.keys()), format_func=lambda r: _roles_eq[r])
+      ce = st.checkbox(
+          "Droit de modification", value=True,
+          help="Permet de modifier / corriger les fiches et les essais déjà enregistrés.",
+      )
+      go_add = st.form_submit_button("Ajouter à mon équipe", type="primary")
+      if go_add:
+        ok, msg = projets_config.ajouter_membre(
+            supabase, nm, pw, rl, ce, [pid_eq], noms_reserves=_reserves
+        )
+        if ok:
+          st.session_state["users_db"] = load_users()
+          st.session_state["flash_equipe"] = f"✅ {msg}"
+          st.rerun()
+        else:
+          st.error(f"❌ {msg}")
+
+    with st.expander("🔗 Redonner l'accès à un compte existant sans chantier"):
+      st.caption(
+          "Pour une personne déjà inscrite mais qui n'a plus accès à aucun chantier."
+          " Si elle travaille déjà sur un autre chantier, demandez à un administrateur."
+      )
+      with st.form(f"form_rattacher_{pid_eq}", clear_on_submit=True):
+        nom_ex = st.text_input("Nom d'utilisateur du compte existant")
+        go_att = st.form_submit_button("Donner accès à ce chantier")
+        if go_att:
+          ok, msg = projets_config.rattacher_compte(supabase, nom_ex, pid_eq)
+          if ok:
+            st.session_state["users_db"] = load_users()
+            st.session_state["flash_equipe"] = f"✅ {msg}"
+            st.rerun()
+          else:
+            st.error(f"❌ {msg}")
+
+    # ---------------- Modifier / retirer ----------------
+    _gerables_m = [m for m in membres if m["gerable"]]
+    if _gerables_m:
+      st.markdown("---")
+      st.subheader("✏️ Modifier ou retirer une personne")
+      noms_m = [m["username"] for m in _gerables_m]
+      sel = st.selectbox("Membre", noms_m, key=f"select_membre_{pid_eq}")
+      mb = next(m for m in _gerables_m if m["username"] == sel)
+
+      if mb["partage"]:
+        st.info(
+            "Ce compte est aussi utilisé sur un autre chantier : seul un administrateur peut"
+            " modifier son rôle ou son mot de passe. Vous pouvez seulement le retirer de"
+            " votre chantier."
+        )
+      else:
+        with st.form(f"form_modif_membre_{pid_eq}_{sel}"):
+          roles_l = list(_roles_eq.keys())
+          rl_m = st.selectbox(
+              "Rôle", roles_l,
+              index=roles_l.index(mb["role"]) if mb["role"] in roles_l else 0,
+              format_func=lambda r: _roles_eq[r],
+          )
+          ce_m = st.checkbox("Droit de modification", value=mb["can_edit"])
+          pw_m = st.text_input(
+              "Nouveau mot de passe (laisser vide pour ne pas le changer)", type="password"
+          )
+          go_mod = st.form_submit_button("Enregistrer les modifications")
+          if go_mod:
+            ok, msg = projets_config.modifier_membre(supabase, sel, rl_m, ce_m, pw_m)
+            if ok:
+              st.session_state["users_db"] = load_users()
+              st.session_state["flash_equipe"] = f"✅ {msg}"
+              st.rerun()
+            else:
+              st.error(f"❌ {msg}")
+
+      supprimer_aussi = False
+      if not mb["partage"]:
+        supprimer_aussi = st.checkbox(
+            "Supprimer aussi le compte (il n'est utilisé sur aucun autre chantier)",
+            key=f"suppr_compte_{pid_eq}_{sel}",
+        )
+      if st.button(
+          "🗑️ Supprimer le compte" if supprimer_aussi else "➖ Retirer de ce chantier",
+          key=f"btn_retirer_{pid_eq}_{sel}",
+      ):
+        if supprimer_aussi:
+          ok, msg = projets_config.supprimer_compte_membre(supabase, sel)
+        else:
+          ok, msg = projets_config.retirer_membre(supabase, sel, pid_eq)
+        if ok:
+          st.session_state["users_db"] = load_users()
+          st.session_state["flash_equipe"] = f"✅ {msg}"
+          st.rerun()
+        else:
+          st.error(f"❌ {msg}")
 
 elif page == "Suivi de Bétonnage":
   render_view(suivi_Betonnage, supabase)
