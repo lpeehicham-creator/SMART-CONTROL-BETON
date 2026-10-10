@@ -3,6 +3,7 @@ import pandas as pd
 from datetime import datetime, date
 from audit_log import enregistrer_modification, afficher_historique_modifications
 import projets_config
+import scan_bl
 
 
 def configurer_acces_terrain(supabase_client):
@@ -46,6 +47,10 @@ def show(supabase):
     # La configuration est répétée ici pour couvrir les clients recréés après
     # une reconnexion Streamlit ou une synchronisation hors ligne.
     configurer_acces_terrain(supabase)
+
+    # Valeurs lues par le scan du BL : à appliquer AVANT la création des champs
+    # du formulaire (Streamlit n'autorise la modification d'un champ qu'avant son affichage).
+    scan_bl.appliquer_scan_en_attente()
     
     # Récupération des informations de session
     user_info = st.session_state.get("user", {})
@@ -67,6 +72,14 @@ def show(supabase):
     # 1. FORMULAIRE DE SAISIE
     # ---------------------------------------------------------
     st.subheader("Saisie d'un contrôle")
+
+    # Scan du bon de livraison (photo ou import) : pré-remplit le formulaire ci-dessous
+    scan_bl.afficher_scan_bl(
+        supabase,
+        projet_id_actif,
+        projets_config.client_projet(projet_id_actif),
+        projets_config.nom_projet(projet_id_actif),
+    )
     
     date_livraison = st.date_input("Date de livraison", value=date.today(), key="saisie_date")
     
@@ -98,13 +111,13 @@ def show(supabase):
         
         classe_beton = st.selectbox(
             "Classe", 
-            ["C20/25", "C25/30", "C30/37", "C35/45", "C40/50", "C45/55"],
+            scan_bl.CLASSES_BETON,
             key="saisie_classe"
         )
         
     with col3:
         centrale = st.text_input("Centrale à Béton", value="TG PREFA", key="saisie_centrale")
-        meteo = st.selectbox("Météo", ["Ensoleillé ☀️", "Nuageux ☁️", "Pluie 🌧️", "Nuit 🌙"], key="saisie_meteo")
+        meteo = st.selectbox("Météo", ["Ensoleillé ☀️", "Nuageux ☁️", "Pluie 🌧️"], key="saisie_meteo")
         
         temp_beton = st.number_input("Température du Béton (°C)", value=20.0, step=0.1, format="%.1f", key="saisie_t_beton")
         temp_ambiante = st.number_input("Température Ambiante (°C)", value=25.0, step=0.1, format="%.1f", key="saisie_t_amb")
@@ -325,7 +338,7 @@ def show(supabase):
                             new_heure_fin = st.time_input("Heure de fin de production", value=def_h_fin, key=f"edit_h_fin_{rec_id}")
                             new_heure_arrivee = st.time_input("Heure d'arrivée au chantier", value=def_h_arr, key=f"edit_h_arr_{rec_id}")
                             
-                            classes_list = ["C20/25", "C25/30","C30/37", "C35/45", "C40/50", "C45/55"]
+                            classes_list = ["C25/30", "C30/37", "C35/45", "C40/50", "C45/55"]
                             current_classe = selected_item.get("classe_beton", "C25/30")
                             idx_classe = classes_list.index(current_classe) if current_classe in classes_list else 0
                             new_classe = st.selectbox("Classe", classes_list, index=idx_classe, key=f"edit_classe_{rec_id}")
