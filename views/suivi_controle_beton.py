@@ -1566,6 +1566,56 @@ def show(supabase):
                     if dates_corrigees_count > 0:
                         st.success(f"🔄 **Synchronisation effectuée** : {dates_corrigees_count} date(s) de coulée réalignée(s) sur la Phase 0 !")
 
+                    # --- Outil rapide : changer l'échéance de quelques éprouvettes ---
+                    # (ex : programmé 7 jours par erreur au lieu de 28 jours).
+                    # Indépendant du tableau éditable ci-dessous : plus fiable.
+                    st.markdown("##### ⚡ Changer rapidement l'échéance d'éprouvettes")
+                    lots_rapide = {}
+                    for ep_r in eprouvettes_enregistrees:
+                        cle_r = f"Réf {ep_r.get('ref_controle') or '-'} — {ep_r.get('ouvrage') or '-'} (Lot #{ep_r.get('betonnage_id')})"
+                        lots_rapide.setdefault(cle_r, []).append(ep_r)
+                    lot_rapide_sel = st.selectbox("1️⃣ Lot", list(lots_rapide.keys()), key="rapide_lot_ech")
+                    eps_lot_rapide = sorted(lots_rapide.get(lot_rapide_sel, []), key=lambda e: str(e.get("repere_eprouvette") or ""))
+                    labels_rapide = {
+                        f"{e.get('repere_eprouvette') or '-'} — {e.get('echeance') or '-'} (prévu {e.get('date_ecrasement') or '-'})": e
+                        for e in eps_lot_rapide
+                    }
+                    reperes_sel = st.multiselect("2️⃣ Éprouvettes à modifier", list(labels_rapide.keys()), key=f"rapide_eps_{lot_rapide_sel}")
+                    nouvelle_ech = st.selectbox("3️⃣ Nouvelle échéance", ["3 jours", "7 jours", "28 jours", "90 jours"], index=2, key="rapide_nouvelle_ech")
+                    if st.button("✅ Appliquer la nouvelle échéance", type="primary", key="btn_rapide_ech", disabled=not reperes_sel):
+                        nb_ok_r = 0
+                        for lab_r in reperes_sel:
+                            e_r = labels_rapide[lab_r]
+                            dt_coulee_r = str(e_r.get("date_coulee") or "").strip()
+                            if not dt_coulee_r:
+                                parent_r = map_betonnages.get(e_r.get("betonnage_id"))
+                                dt_coulee_r = extraire_date_coulee(parent_r) if parent_r else ""
+                            try:
+                                dt_c_r = datetime.strptime(dt_coulee_r[:10], "%Y-%m-%d").date()
+                                nouvelle_date_r = str(dt_c_r + timedelta(days=extraire_nb_jours(nouvelle_ech, default=28)))
+                            except (ValueError, TypeError):
+                                st.error(f"Date de coulée invalide pour {e_r.get('repere_eprouvette')} : impossible de recalculer.")
+                                continue
+                            pay_r = {"echeance": nouvelle_ech, "date_ecrasement": nouvelle_date_r}
+                            try:
+                                supabase.table("suivi_controle_beton").update(pay_r).eq("id", e_r["id"]).execute()
+                                enregistrer_modification(
+                                    supabase,
+                                    table_concernee="suivi_controle_beton",
+                                    enregistrement_id=e_r["id"],
+                                    action="MODIFICATION",
+                                    anciennes_valeurs={k: e_r.get(k) for k in pay_r},
+                                    nouvelles_valeurs=pay_r,
+                                    commentaire="Changement d'échéance (outil rapide Phase 1)",
+                                )
+                                nb_ok_r += 1
+                            except Exception as err_r:
+                                st.error(f"Erreur pour #{e_r.get('id')} : {err_r}")
+                        if nb_ok_r:
+                            st.success(f"✅ {nb_ok_r} éprouvette(s) passée(s) à {nouvelle_ech}.")
+                            st.rerun()
+                    st.markdown("---")
+
                     df_edit_prog = pd.DataFrame(eprouvettes_enregistrees)
                     cols_ed = [c for c in ["id", "betonnage_id", "ref_controle", "repere_eprouvette", "echeance", "date_ecrasement", "date_coulee", "ouvrage", "classe_beton", "type_essai", "forme"] if c in df_edit_prog.columns]
                     df_display_prog = df_edit_prog[cols_ed].copy()
@@ -1642,9 +1692,11 @@ def show(supabase):
 
                     if st.button("💾 Enregistrer les Modifications de Programmation", type="primary", use_container_width=True, key="btn_save_mod_prog"):
                         bloque_mod = False
+                        _orig_chk = {ep["id"]: ep for ep in eprouvettes_enregistrees}
                         for _, r_m in df_prog_modifiee.iterrows():
                             ref_ctrl = str(r_m.get("ref_controle", "")).strip()
-                            if ref_ctrl and verifier_doublon_num_reception(supabase, ref_ctrl, current_beton_id=r_m.get("betonnage_id"), projet_id=projet_id_actif):
+                            _ref_orig = str(_orig_chk.get(int(r_m["id"]), {}).get("ref_controle") or "").strip()
+                            if ref_ctrl and ref_ctrl != _ref_orig and verifier_doublon_num_reception(supabase, ref_ctrl, current_beton_id=r_m.get("betonnage_id"), projet_id=projet_id_actif):
                                 st.error(f"❌ **Modification Bloquée** : La Réf `{ref_ctrl}` existe déjà !")
                                 bloque_mod = True
                                 break
@@ -1686,6 +1738,9 @@ def show(supabase):
                                 }
                                 try:
                                     orig_row_p1 = orig_par_id_p1.get(ep_id, {})
+                                    _defauts = {"type_essai": "Compression", "forme": "Cylindrique 150x300"}
+                                    if all(str(orig_row_p1.get(k) or _defauts.get(k, "")).strip() == str(pay[k] or "").strip() for k in pay):
+                                        continue  # ligne inchangée : rien à enregistrer
                                     supabase.table("suivi_controle_beton").update(pay).eq("id", ep_id).execute()
                                     enregistrer_modification(
                                         supabase,
