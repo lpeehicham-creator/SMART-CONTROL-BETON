@@ -496,6 +496,7 @@ def attribuer_acces(supabase, username, projet_id):
 # `responsable_chantier` ne peuvent être donnés que par un administrateur.
 ROLES_EQUIPE = {
     "laboratoire": "Technicien laboratoire (essais + bétonnage)",
+    "coordinateur_essais": "Coordinateur des essais (mêmes accès qu'un technicien laboratoire)",
     "restricted_betonnage": "Opérateur bétonnage (saisie du suivi de bétonnage)",
     "user": "Consultation (lecture seule)",
 }
