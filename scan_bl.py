@@ -14,7 +14,7 @@ Sécurité :
 - l'image n'est pas conservée par l'application.
 
 Secrets Streamlit reconnus :
-    OPENAI_API_KEY                (obligatoire ; ou [openai] API_KEY = "...")
+    GEMINI_API_KEY                (obligatoire ; ou [openai] API_KEY = "...")
     OPENAI_MODEL_SCAN             (facultatif, défaut : gpt-4o-mini)
     OPENAI_MODEL_SCAN_RENFORCE    (facultatif, défaut : gpt-4o)
 """
