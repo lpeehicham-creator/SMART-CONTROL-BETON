@@ -562,17 +562,13 @@ def generer_pv_excel(export_data, infos_header):
     r_sig_titre = next_row + 2
     r_sig_debut, r_sig_fin = r_sig_titre + 1, r_sig_titre + 4
 
-    ws.merge_cells(start_row=r_sig_titre, start_column=2, end_row=r_sig_titre, end_column=4)
-    format_cell(ws.cell(row=r_sig_titre, column=2, value="Visa Responsable d'essai"), font=font_bold, align=align_center)
-
-    ws.merge_cells(start_row=r_sig_debut, start_column=2, end_row=r_sig_fin, end_column=4)
-    format_cell(ws.cell(row=r_sig_debut, column=2, value="O.IKKEN"), font=font_bold, align=align_top_center)
-
-    ws.merge_cells(start_row=r_sig_titre, start_column=6, end_row=r_sig_titre, end_column=8)
-    format_cell(ws.cell(row=r_sig_titre, column=6, value="Visa Chef du laboratoire"), font=font_bold, align=align_center)
-
-    ws.merge_cells(start_row=r_sig_debut, start_column=6, end_row=r_sig_fin, end_column=8)
-    format_cell(ws.cell(row=r_sig_debut, column=6, value="H.BAALLAL"), font=font_bold, align=align_top_center)
+    # Cases de visa : signataires propres au chantier (créés avec le chantier)
+    visas_pv = projets_config.visas_pv()
+    for (titre_v, nom_v), (c1_v, c2_v) in zip(visas_pv, projets_config.colonnes_visas(len(visas_pv))):
+        ws.merge_cells(start_row=r_sig_titre, start_column=c1_v, end_row=r_sig_titre, end_column=c2_v)
+        format_cell(ws.cell(row=r_sig_titre, column=c1_v, value=titre_v), font=font_bold, align=align_center)
+        ws.merge_cells(start_row=r_sig_debut, start_column=c1_v, end_row=r_sig_fin, end_column=c2_v)
+        format_cell(ws.cell(row=r_sig_debut, column=c1_v, value=nom_v), font=font_bold, align=align_top_center)
 
     row_heights = {7: 32, 8: 48, 10: 23, 11: 23, 9: 15, 12: 15, 13: 15, 14: 15}
     for r in range(1, r_sig_fin + 1):
@@ -1056,8 +1052,8 @@ def afficher_module_validation_admin(supabase, est_admin=False):
         with st.form("form_valider_pv"):
             st.markdown("##### ✍️ Décision & Signatures Officielles")
             col_sig1, col_sig2 = st.columns(2)
-            resp_essai = col_sig1.text_input("Visa Responsable d'essai", value=info_b_sel.get("visa_resp") or "O.IKKEN")
-            chef_labo = col_sig2.text_input("Visa Chef du laboratoire", value=info_b_sel.get("visa_chef") or "H.BAALLAL")
+            resp_essai = col_sig1.text_input("Visa Responsable d'essai", value=info_b_sel.get("visa_resp") or projets_config.nom_signataire("Responsable d'essai"))
+            chef_labo = col_sig2.text_input("Visa Chef du laboratoire", value=info_b_sel.get("visa_chef") or projets_config.nom_signataire("Chef de laboratoire"))
 
             statut_decision = st.radio(
                 "Décision d'approbation :",
