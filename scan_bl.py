@@ -14,7 +14,7 @@ Sécurité :
 - l'image n'est pas conservée par l'application.
 
 Secrets Streamlit reconnus :
-    OPENAI_API_KEY                (obligatoire)
+    OPENAI_API_KEY                (obligatoire ; ou [openai] API_KEY = "...")
     OPENAI_MODEL_SCAN             (facultatif, défaut : gpt-4o-mini)
     OPENAI_MODEL_SCAN_RENFORCE    (facultatif, défaut : gpt-4o)
 """
@@ -134,17 +134,28 @@ def _secret(nom, defaut=None):
 
 
 def _cle_openai():
-    """Clé API depuis les secrets Streamlit (plusieurs écritures tolérées)."""
-    for nom in ("OPENAI_API_KEY", "openai_api_key", "OPENAI_KEY"):
-        valeur = _secret(nom)
-        if valeur:
-            return str(valeur).strip()
-    try:  # [openai] api_key = "..."
-        bloc = st.secrets.get("openai")
-        if bloc and bloc.get("api_key"):
-            return str(bloc.get("api_key")).strip()
+    """Clé API depuis les secrets Streamlit. Plusieurs écritures sont acceptées,
+    sans tenir compte des majuscules/minuscules :
+        OPENAI_API_KEY = "sk-..."          (à la racine)
+        [openai]  API_KEY = "sk-..."       (dans un bloc, aussi api_key / key)
+    """
+    try:
+        racine = dict(st.secrets)
     except Exception:
-        pass
+        racine = {}
+
+    # 1. clé à la racine
+    for nom, valeur in racine.items():
+        if str(nom).lower() in ("openai_api_key", "openai_key") and isinstance(valeur, str) and valeur.strip():
+            return valeur.strip()
+
+    # 2. clé dans un bloc [openai]
+    for nom, bloc in racine.items():
+        if str(nom).lower() == "openai" and hasattr(bloc, "items"):
+            for sous_nom, valeur in bloc.items():
+                if (str(sous_nom).lower() in ("api_key", "apikey", "key", "openai_api_key")
+                        and isinstance(valeur, str) and valeur.strip()):
+                    return valeur.strip()
     return None
 
 
