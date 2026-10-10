@@ -13,6 +13,8 @@ import unicodedata
 
 import streamlit as st
 
+import securite
+
 PROJET_PAR_DEFAUT = "LGV_CASA_SUD"
 
 # Repli si la table `projets` est inaccessible (jamais d'écriture depuis ici).
@@ -587,8 +589,9 @@ def ajouter_membre(supabase, username, password, role, can_edit, projets, noms_r
                        "chiffres, point, tiret).")
     if username in {n.upper() for n in noms_reserves}:
         return False, "Ce nom d'utilisateur est réservé. Choisissez-en un autre."
-    if len(password) < 6:
-        return False, "Le mot de passe doit contenir au moins 6 caractères."
+    err_mdp = securite.valider_mot_de_passe(password, username)
+    if err_mdp:
+        return False, err_mdp
     if role not in ROLES_EQUIPE:
         return False, "Rôle non autorisé pour un responsable de chantier."
     if not projets:
@@ -601,7 +604,7 @@ def ajouter_membre(supabase, username, password, role, can_edit, projets, noms_r
             return False, (f"Le nom {username} existe déjà. Pour donner accès à ce chantier à un "
                            "compte existant, utilisez « Ajouter un compte existant ».")
         supabase.table("app_users").insert({
-            "username": username, "password": password, "role": role,
+            "username": username, "password": securite.hasher_mot_de_passe(password), "role": role,
             "can_edit": bool(can_edit), "projets_autorises": ",".join(projets),
         }).execute()
     except Exception as e:
@@ -667,9 +670,10 @@ def modifier_membre(supabase, username, role, can_edit, nouveau_mdp=""):
             return False, "Rôle non autorisé pour un responsable de chantier."
         valeurs = {"role": role, "can_edit": bool(can_edit)}
         if nouveau_mdp:
-            if len(nouveau_mdp) < 6:
-                return False, "Le mot de passe doit contenir au moins 6 caractères."
-            valeurs["password"] = nouveau_mdp
+            err_mdp = securite.valider_mot_de_passe(nouveau_mdp, compte["username"])
+            if err_mdp:
+                return False, err_mdp
+            valeurs["password"] = securite.hasher_mot_de_passe(nouveau_mdp)
         supabase.table("app_users").update(valeurs).eq("username", compte["username"]).execute()
     except Exception as e:
         return False, f"Erreur Supabase : {e}"
