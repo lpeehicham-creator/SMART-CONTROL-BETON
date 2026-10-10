@@ -487,3 +487,222 @@ def attribuer_acces(supabase, username, projet_id):
         return True, None
     except Exception as e:
         return False, str(e)
+
+
+# ==============================================================================
+# ÉQUIPE DU CHANTIER (comptes que le responsable de chantier peut gérer)
+# ==============================================================================
+# Rôles qu'un responsable de chantier peut attribuer. Les rôles `admin` et
+# `responsable_chantier` ne peuvent être donnés que par un administrateur.
+ROLES_EQUIPE = {
+    "laboratoire": "Technicien laboratoire (essais + bétonnage)",
+    "restricted_betonnage": "Opérateur bétonnage (saisie du suivi de bétonnage)",
+    "user": "Consultation (lecture seule)",
+}
+
+
+def _liste_projets_texte(texte):
+    return [p.strip() for p in (texte or "").split(",") if p.strip()]
+
+
+def projets_gerables(user_info):
+    """Chantiers dont l'utilisateur peut gérer l'équipe (admin, responsable
+    de chantier : ceux auxquels il a accès)."""
+    if not user_info or user_info.get("role") not in ROLES_CREATEURS_PROJET:
+        return []
+    return liste_projets_utilisateur(user_info)
+
+
+def _utilisateur_session():
+    return st.session_state.get("user") or {}
+
+
+def _lire_compte(supabase, username):
+    res = supabase.table("app_users").select(
+        "username, role, can_edit, projets_autorises"
+    ).eq("username", username).execute()
+    if not res.data:
+        return None
+    row = res.data[0]
+    return {
+        "username": row["username"],
+        "role": row.get("role"),
+        "can_edit": bool(row.get("can_edit")),
+        "projets": _liste_projets_texte(row.get("projets_autorises")),
+    }
+
+
+def lister_equipe(supabase, projet_id):
+    """Comptes ayant accès à ce chantier (hors administrateurs). Chaque entrée :
+    username, role, can_edit, partage (compte aussi rattaché à un chantier que
+    le responsable ne gère pas), gerable (rôle d'équipe, modifiable)."""
+    user = _utilisateur_session()
+    gerables = set(projets_gerables(user))
+    if projet_id not in gerables:
+        return []
+    try:
+        res = supabase.table("app_users").select(
+            "username, role, can_edit, projets_autorises"
+        ).execute()
+    except Exception:
+        return []
+    membres = []
+    for row in res.data or []:
+        projets = _liste_projets_texte(row.get("projets_autorises"))
+        role = row.get("role")
+        if projet_id not in projets or role == "admin":
+            continue
+        membres.append({
+            "username": row["username"],
+            "role": role,
+            "can_edit": bool(row.get("can_edit")),
+            "partage": bool(set(projets) - gerables),
+            "gerable": role in ROLES_EQUIPE and row["username"] != user.get("username"),
+        })
+    return sorted(membres, key=lambda m: m["username"])
+
+
+def _verifier_gestion(projet_id=None):
+    user = _utilisateur_session()
+    gerables = projets_gerables(user)
+    if not gerables:
+        return None, "Vous n'avez pas le droit de gérer une équipe."
+    if projet_id is not None and projet_id not in gerables:
+        return None, "Vous ne gérez pas ce chantier."
+    return user, None
+
+
+def ajouter_membre(supabase, username, password, role, can_edit, projets, noms_reserves=()):
+    """Crée un NOUVEAU compte rattaché uniquement aux chantiers `projets`
+    (qui doivent tous être gérés par l'appelant). Retourne (ok, message)."""
+    user, err = _verifier_gestion()
+    if err:
+        return False, err
+    username = (username or "").strip().upper()
+    password = password or ""
+    projets = list(dict.fromkeys(projets or []))
+    if not re.fullmatch(r"[A-Z0-9][A-Z0-9._-]{2,29}", username):
+        return False, ("Nom d'utilisateur invalide : 3 à 30 caractères (lettres, "
+                       "chiffres, point, tiret).")
+    if username in {n.upper() for n in noms_reserves}:
+        return False, "Ce nom d'utilisateur est réservé. Choisissez-en un autre."
+    if len(password) < 6:
+        return False, "Le mot de passe doit contenir au moins 6 caractères."
+    if role not in ROLES_EQUIPE:
+        return False, "Rôle non autorisé pour un responsable de chantier."
+    if not projets:
+        return False, "Sélectionnez au moins un chantier."
+    gerables = set(projets_gerables(user))
+    if any(p not in gerables for p in projets):
+        return False, "Vous ne gérez pas ce chantier."
+    try:
+        if _lire_compte(supabase, username):
+            return False, (f"Le nom {username} existe déjà. Pour donner accès à ce chantier à un "
+                           "compte existant, utilisez « Ajouter un compte existant ».")
+        supabase.table("app_users").insert({
+            "username": username, "password": password, "role": role,
+            "can_edit": bool(can_edit), "projets_autorises": ",".join(projets),
+        }).execute()
+    except Exception as e:
+        return False, f"Erreur Supabase : {e}"
+    return True, f"Compte {username} créé et rattaché au chantier."
+
+
+def rattacher_compte(supabase, username, projet_id):
+    """Donne accès à ce chantier à un compte EXISTANT qui n'a plus accès à
+    aucun chantier (par exemple un membre retiré d'une équipe). Un compte
+    déjà utilisé sur un autre chantier ne peut pas être rattaché ici : sinon
+    le responsable de cet autre chantier perdrait la main sur son propre
+    membre. Dans ce cas, c'est un administrateur qui fait le lien."""
+    user, err = _verifier_gestion(projet_id)
+    if err:
+        return False, err
+    username = (username or "").strip().upper()
+    indisponible = (f"Aucun compte disponible nommé {username or '…'} (introuvable, ou déjà "
+                    "utilisé sur un autre chantier : demandez à un administrateur).")
+    if not username or username == user.get("username"):
+        return False, "Nom d'utilisateur invalide."
+    try:
+        compte = _lire_compte(supabase, username)
+        if not compte or compte["role"] not in ROLES_EQUIPE or compte["projets"]:
+            return False, indisponible
+        supabase.table("app_users").update(
+            {"projets_autorises": projet_id}
+        ).eq("username", username).execute()
+    except Exception as e:
+        return False, f"Erreur Supabase : {e}"
+    return True, f"{username} a maintenant accès à ce chantier."
+
+
+def _compte_gerable(supabase, username, exclusif):
+    """(compte, erreur) : compte à rôle d'équipe, différent de l'appelant ;
+    si `exclusif`, doit appartenir uniquement à des chantiers gérés par l'appelant."""
+    user, err = _verifier_gestion()
+    if err:
+        return None, err
+    username = (username or "").strip().upper()
+    if username == user.get("username"):
+        return None, "Vous ne pouvez pas modifier votre propre compte ici."
+    compte = _lire_compte(supabase, username)
+    if not compte:
+        return None, f"Aucun compte {username} trouvé."
+    if compte["role"] not in ROLES_EQUIPE:
+        return None, "Ce compte ne peut pas être géré par un responsable de chantier."
+    if exclusif and set(compte["projets"]) - set(projets_gerables(user)):
+        return None, ("Ce compte est aussi rattaché à un autre chantier : seul un "
+                      "administrateur peut le modifier ou le supprimer. Vous pouvez "
+                      "seulement le retirer de votre chantier.")
+    return compte, None
+
+
+def modifier_membre(supabase, username, role, can_edit, nouveau_mdp=""):
+    """Change le rôle / le droit de modification / le mot de passe d'un membre
+    qui n'appartient qu'à des chantiers du responsable."""
+    try:
+        compte, err = _compte_gerable(supabase, username, exclusif=True)
+        if err:
+            return False, err
+        if role not in ROLES_EQUIPE:
+            return False, "Rôle non autorisé pour un responsable de chantier."
+        valeurs = {"role": role, "can_edit": bool(can_edit)}
+        if nouveau_mdp:
+            if len(nouveau_mdp) < 6:
+                return False, "Le mot de passe doit contenir au moins 6 caractères."
+            valeurs["password"] = nouveau_mdp
+        supabase.table("app_users").update(valeurs).eq("username", compte["username"]).execute()
+    except Exception as e:
+        return False, f"Erreur Supabase : {e}"
+    return True, f"Compte {compte['username']} mis à jour."
+
+
+def retirer_membre(supabase, username, projet_id):
+    """Retire l'accès à CE chantier (les autres chantiers du compte restent)."""
+    try:
+        user, err = _verifier_gestion(projet_id)
+        if err:
+            return False, err
+        compte, err = _compte_gerable(supabase, username, exclusif=False)
+        if err:
+            return False, err
+        if projet_id not in compte["projets"]:
+            return False, f"{compte['username']} n'a pas accès à ce chantier."
+        restants = [p for p in compte["projets"] if p != projet_id]
+        supabase.table("app_users").update(
+            {"projets_autorises": ",".join(restants)}
+        ).eq("username", compte["username"]).execute()
+    except Exception as e:
+        return False, f"Erreur Supabase : {e}"
+    return True, f"{compte['username']} n'a plus accès à ce chantier."
+
+
+def supprimer_compte_membre(supabase, username):
+    """Supprime définitivement un compte qui n'appartient qu'à des chantiers
+    du responsable."""
+    try:
+        compte, err = _compte_gerable(supabase, username, exclusif=True)
+        if err:
+            return False, err
+        supabase.table("app_users").delete().eq("username", compte["username"]).execute()
+    except Exception as e:
+        return False, f"Erreur Supabase : {e}"
+    return True, f"Compte {compte['username']} supprimé."
