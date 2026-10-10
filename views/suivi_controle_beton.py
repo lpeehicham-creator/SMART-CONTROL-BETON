@@ -473,9 +473,16 @@ def generer_pv_excel(export_data, infos_header):
             format_cell(ws.cell(row=r, column=c), font=font_bold if r == 13 or c == 1 else font_regular, align=align_center, fill=fill_table)
 
     row_start = 15
+    # Tri stable par âge puis date d'essai : les éprouvettes d'une même date
+    # d'écrasement sont ainsi contiguës (nécessaire pour fusionner la moyenne).
+    export_data = sorted(
+        export_data,
+        key=lambda it: (extraire_nb_jours(it.get("age"), default=7), str(it.get("date_essai") or "")),
+    )
     nb_total = len(export_data)
     groupes_lots = {}
-    a_des_28j_ecrases, cellule_moyenne_28j = False, None
+    lignes_en_cours = set()
+    cellules_moyennes_28j, moyenne_28j_en_cours = [], False
 
     for idx, item in enumerate(export_data):
         curr_row = row_start + idx
@@ -512,30 +519,37 @@ def generer_pv_excel(export_data, infos_header):
 
         cle_lot = f"{item.get('age')}_{item.get('date_essai')}"
         if cle_lot not in groupes_lots:
-            groupes_lots[cle_lot] = {"lignes": [], "en_cours": is_en_cours, "age": age_val}
-        elif is_en_cours:
-            groupes_lots[cle_lot]["en_cours"] = True
+            groupes_lots[cle_lot] = {"lignes": [], "age": age_val}
         groupes_lots[cle_lot]["lignes"].append(curr_row)
+        if is_en_cours:
+            lignes_en_cours.add(curr_row)
 
+    # Une moyenne par SÉRIE DE 3 ÉPROUVETTES : un groupe (même âge + même date
+    # d'écrasement) de 6 ou 9 éprouvettes donne 2 ou 3 moyennes distinctes.
+    TAILLE_SERIE = 3
     for cle_lot, data_lot in groupes_lots.items():
-        lignes = data_lot["lignes"]
-        start_r, end_r = min(lignes), max(lignes)
-        cell_h = ws[f"H{start_r}"]
+        lignes = sorted(data_lot["lignes"])
+        est_28j = extraire_nb_jours(data_lot["age"]) >= 28
+        for i in range(0, len(lignes), TAILLE_SERIE):
+            serie = lignes[i:i + TAILLE_SERIE]
+            start_r, end_r = serie[0], serie[-1]
+            cell_h = ws[f"H{start_r}"]
+            serie_en_cours = any(r in lignes_en_cours for r in serie)
 
-        if data_lot["en_cours"]:
-            if start_r != end_r: ws.merge_cells(f"H{start_r}:H{end_r}")
-            cell_h.value = "En cours"
-        else:
-            if start_r == end_r:
-                cell_h.value = f"=ROUND(F{start_r}, 1)"
+            if serie_en_cours:
+                if start_r != end_r: ws.merge_cells(f"H{start_r}:H{end_r}")
+                cell_h.value = "En cours"
+                if est_28j: moyenne_28j_en_cours = True
             else:
-                ws.merge_cells(f"H{start_r}:H{end_r}")
-                cell_h.value = f"=ROUND(AVERAGE(F{start_r}:F{end_r}), 1)"
-            cell_h.number_format = "0.0"
-            if extraire_nb_jours(data_lot["age"]) >= 28:
-                a_des_28j_ecrases, cellule_moyenne_28j = True, f"H{start_r}"
+                if start_r == end_r:
+                    cell_h.value = f"=ROUND(F{start_r}, 1)"
+                else:
+                    ws.merge_cells(f"H{start_r}:H{end_r}")
+                    cell_h.value = f"=ROUND(AVERAGE(F{start_r}:F{end_r}), 1)"
+                cell_h.number_format = "0.0"
+                if est_28j: cellules_moyennes_28j.append(f"H{start_r}")
 
-        format_cell(cell_h, font=font_bold, align=align_center)
+            format_cell(cell_h, font=font_bold, align=align_center)
 
     next_row = row_start + nb_total
     ws.cell(row=next_row, column=1, value="Commentaire :")
@@ -550,11 +564,12 @@ def generer_pv_excel(export_data, infos_header):
             seuil_min = seuil
             break
 
-    if not a_des_28j_ecrases or not cellule_moyenne_28j:
+    if not cellules_moyennes_28j or moyenne_28j_en_cours:
         formule_commentaires = "PERFORMANCES MECANIQUES A 28 JOURS SERONT DONNES ULTERIEUREMENT."
     else:
-        m_cell = cellule_moyenne_28j
-        formule_commentaires = f'=IF(OR(ISBLANK({m_cell}), {m_cell}="En cours"), "PERFORMANCES MECANIQUES A 28 JOURS SERONT DONNES ULTERIEUREMENT.", IF({m_cell}>={seuil_min}, "{obs_defaut}", "PERFORMANCES MECANIQUES NON CONFORMES"))'
+        # Conforme seulement si TOUTES les moyennes de séries de 3 à 28 jours sont >= seuil
+        min_28j = "MIN(" + ",".join(cellules_moyennes_28j) + ")"
+        formule_commentaires = f'=IF({min_28j}>={seuil_min}, "{obs_defaut}", "PERFORMANCES MECANIQUES NON CONFORMES")'
 
     format_cell(ws.cell(row=next_row, column=2, value=formule_commentaires), font=font_bold, align=align_left)
     for c in range(1, 9): ws.cell(row=next_row, column=c).border = border_cell
