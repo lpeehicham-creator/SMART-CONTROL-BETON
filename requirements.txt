@@ -11,3 +11,4 @@ qrcode
 Pillow
 extra-streamlit-components
 reportlab
+openai>=1.0.0
