@@ -567,8 +567,10 @@ with st.sidebar:
         "Suivi de Bétonnage",
         "Synthèse Béton",
     ]
-  elif current_role in ["laboratoire", "technicien"]:
-    if current_username == "HANINE":
+  elif current_role in ["laboratoire", "technicien", "coordinateur_essais"]:
+    if current_role == "coordinateur_essais":
+      st.info("Rôle : **COORDINATEUR DES ESSAIS**")
+    elif current_username == "HANINE":
       st.info("Rôle : **RESPONSABLE DE DOSSIER**")
     elif current_username == "AMINA":
       st.info("Rôle : **TECHNICIENNE LABORATOIRE (Saisie/Modification)**")
@@ -781,7 +783,7 @@ elif page == "Gestion Utilisateurs" and current_role == "admin":
       " plateforme (sauvegarde permanente Supabase)."
   )
 
-  ROLES_LIST = ["laboratoire", "restricted_betonnage", "responsable_chantier", "admin", "user"]
+  ROLES_LIST = ["laboratoire", "coordinateur_essais", "restricted_betonnage", "responsable_chantier", "admin", "user"]
   _registre = projets_config.get_projets()
   PROJETS_LIST = list(_registre.keys())
   PROJETS_LABELS = {
