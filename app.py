@@ -9,6 +9,7 @@ import streamlit.components.v1 as components
 import extra_streamlit_components as stx
 from supabase import Client, create_client
 import projets_config
+import securite
 
 # Importation sécurisée du gestionnaire Hors-Ligne SQLite
 try:
@@ -77,9 +78,13 @@ if _qr_rec or _qr_bid:
 #     de récupérer les cookies déjà présents avant toute vérification,
 #  2) une courte pause après l'écriture d'un nouveau cookie, avant de
 #     recharger la vue, pour laisser le temps au navigateur de l'enregistrer.
-REMEMBER_SECRET_KEY = os.environ.get(
-    "REMEMBER_SECRET_KEY", "lpee_ctr_csb_remember_me_2026_a_changer"
-)
+_REMEMBER_KEY_PAR_DEFAUT = "lpee_ctr_csb_remember_me_2026_a_changer"
+try:
+    _cle_secrete = os.environ.get("REMEMBER_SECRET_KEY") or st.secrets.get("REMEMBER_SECRET_KEY")
+except Exception:
+    _cle_secrete = os.environ.get("REMEMBER_SECRET_KEY")
+REMEMBER_SECRET_KEY = _cle_secrete or _REMEMBER_KEY_PAR_DEFAUT
+REMEMBER_KEY_PAR_DEFAUT = REMEMBER_SECRET_KEY == _REMEMBER_KEY_PAR_DEFAUT
 REMEMBER_SESSION_DUREE = datetime.timedelta(hours=4)
 REMEMBER_COOKIE_NAME = "remember_data"
 
@@ -87,7 +92,7 @@ REMEMBER_COOKIE_NAME = "remember_data"
 def _generer_jeton_souvenir(username, role, can_edit, projets_autorises, issued_at_iso):
     """Jeton signé auto-suffisant (indépendant de la base utilisateurs),
     pour fonctionner avec les 3 chemins de connexion possibles (compte
-    nommé, mot de passe maître admin2026, mot de passe maître ctr2026).
+    nommé, mots de passe maîtres administrateur / générique).
     L'horodatage de connexion (issued_at_iso) est inclus dans la signature
     afin de pouvoir vérifier côté serveur que la session ne dépasse pas
     REMEMBER_SESSION_DUREE, indépendamment de l'expiration du cookie
@@ -237,16 +242,16 @@ def generate_pdf_report(
 # ==========================================
 try:
   SUPABASE_URL = st.secrets.get(
-      "SUPABASE_URL", "https://ibiejnzafnszsopqvuwr.supabase.co"
+      "SUPABASE_URL", "https://votre-projet.supabase.co"
   )
   SUPABASE_KEY = st.secrets.get(
-      "SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImliaWVqbnphZm5zenNvcHF2dXdyIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MTU2MTExOCwiZXhwIjoyMTA3MTM3MTE4fQ.ZDJ7bPbO0IFI80VkwJqv4nKEdfhrC5vWd1Te3tFYrPI"
+      "SUPABASE_KEY", "sb_publishable_m8g5mocsCDgk3JpS1lpuCQ_3wOPyet1"
   )
   # Code partagé exigé par la politique RLS sur suivi_betonnage (voir le SQL
   # fourni pour la page hors-ligne). L'app principale doit envoyer le même
   # en-tête que offline_betonnage.html, sinon ses propres insertions seraient
   # bloquées par cette même règle de sécurité.
-  CODE_ACCES_TERRAIN = st.secrets.get("CODE_ACCES_TERRAIN", "lpee2026")
+  CODE_ACCES_TERRAIN = st.secrets.get("CODE_ACCES_TERRAIN", "CHANGEZ_MOI_2026")
 
   # Création du client SANS argument supplémentaire (comme avant) : c'est le
   # passage d'un ClientOptions à create_client() qui faisait planter la
@@ -270,41 +275,54 @@ try:
 except Exception:
   supabase = None
 
+# Comptes historiques intégrés au code. Les mots de passe sont HACHÉS (jamais en
+# clair) : voir securite.py. Un mot de passe modifié par l'utilisateur est
+# enregistré (haché) dans la table app_users et remplace celui-ci.
 DEFAULT_USERS = {
-    "BAALLAL": {"password": "arwa2020", "role": "admin", "can_edit": True, "projets_autorises": ["LGV_CASA_SUD"]},
-    "AMINA": {"password": "amina2026", "role": "laboratoire", "can_edit": True, "projets_autorises": ["LGV_CASA_SUD"]},
+    "BAALLAL": {"password": "pbkdf2_sha256$600000$p+avS8OAIKvQCNis48bmWA==$j2lmEmR/7BPGBm0JMuiqwoChAPFUVOBVsSncbh5N64Q=", "role": "admin", "can_edit": True, "projets_autorises": ["LGV_CASA_SUD"]},
+    "AMINA": {"password": "pbkdf2_sha256$600000$QwgkP2+Eo/70OLhVS3XGRw==$BvSBnb6TwQB9dthhyyBYNrQfjpz7fxKhRUqsctf9Y1Y=", "role": "laboratoire", "can_edit": True, "projets_autorises": ["LGV_CASA_SUD"]},
     "HANINE": {
-        "password": "hanine2026",
+        "password": "pbkdf2_sha256$600000$FfK0pOEOJB9Io8EYHpnYmA==$I8R18FvX7BWebamADySkaWBIve9uDmFUv0pNxrl9G6s=",
         "role": "laboratoire",
         "can_edit": False,
         "projets_autorises": ["LGV_CASA_SUD"],
     },
-    "IKKEN": {"password": "ikken2026", "role": "laboratoire", "can_edit": False, "projets_autorises": ["LGV_CASA_SUD"]},
+    "IKKEN": {"password": "pbkdf2_sha256$600000$8vJAe50FkWTH8nObrTIjgQ==$WIqqDlfL785O2AoR6/CR0nbzWFYkIXwQCMVjAovMtx0=", "role": "laboratoire", "can_edit": False, "projets_autorises": ["LGV_CASA_SUD"]},
     "HAMDANI": {
-        "password": "hamdani2026",
+        "password": "pbkdf2_sha256$600000$yDntBDJ8JK3N/VR9vk2KGA==$UynJgmU/5ZDBoi5XCBY/021bo7rYoM3r+GwVJ38CNmI=",
         "role": "laboratoire",
         "can_edit": False,
         "projets_autorises": ["LGV_CASA_SUD"],
     },
     "ADAM": {
-        "password": "ctr2026",
+        "password": "pbkdf2_sha256$600000$qOanNWOd9NLmfIiY1ZoKFA==$E5zKAht4X5nLm10CCWzcx2n6aaImuICEji9p/VDLKiM=",
         "role": "restricted_betonnage",
         "can_edit": False,
         "projets_autorises": ["LGV_CASA_SUD"],
     },
     "LAHCEN": {
-        "password": "ctr2026",
+        "password": "pbkdf2_sha256$600000$7dMUX9agA/lDFQMRS7NVtw==$7w6/C/+OWQum8By3dNCECK5GIeiFmxyTvkhvCNmv9dI=",
         "role": "restricted_betonnage",
         "can_edit": False,
         "projets_autorises": ["LGV_CASA_SUD"],
     },
     "ELIDRISSI": {
-        "password": "ctr2026",
+        "password": "pbkdf2_sha256$600000$pLSOM2AB8ftcZ2Io1YrTvA==$NycBq9mL2yJFzrt+rqjzLH/bj974FRtnnCJkD/TCGd0=",
         "role": "restricted_betonnage",
         "can_edit": False,
         "projets_autorises": ["LGV_CASA_SUD"],
     },
 }
+
+
+# Mots de passe « maîtres » historiques, conservés HACHÉS (plus en clair dans le
+# code). Pour les désactiver sans modifier le code : secret MOTS_DE_PASSE_MAITRES = "non".
+MAITRE_ADMIN_HASH = "pbkdf2_sha256$600000$DYyayfl0+9MjoelPjW5z3Q==$mSNNZycey70SCnNbABMfRs/D7CdXgOc0nRylpOgrnmw="
+MAITRE_GENERIQUE_HASH = "pbkdf2_sha256$600000$OvT+wtQTSUl1z7jC4vn59w==$B8mPKwLEnrBjINdlqXL/jfe+tjmjskHO2C/chr4zBHk="
+try:
+    MOTS_DE_PASSE_MAITRES_ACTIFS = str(st.secrets.get("MOTS_DE_PASSE_MAITRES", "oui")).strip().lower() != "non"
+except Exception:
+    MOTS_DE_PASSE_MAITRES_ACTIFS = True
 
 
 def load_users():
@@ -334,9 +352,12 @@ def save_user_db(username, password, role, can_edit, projets_autorises=None):
   if not supabase:
     return False, "Client Supabase non configuré."
   try:
+    # Jamais de mot de passe en clair en base. Une valeur déjà hachée (cas d'une
+    # modification sans changement de mot de passe) est conservée telle quelle.
+    mot_de_passe = password if securite.est_hache(password) else securite.hasher_mot_de_passe(password)
     supabase.table("app_users").upsert({
         "username": username,
-        "password": password,
+        "password": mot_de_passe,
         "role": role,
         "can_edit": can_edit,
         "projets_autorises": ",".join(projets_autorises or []),
@@ -344,6 +365,39 @@ def save_user_db(username, password, role, can_edit, projets_autorises=None):
     return True, None
   except Exception as e:
     return False, str(e)
+
+
+def hacher_tous_les_mots_de_passe():
+  """Convertit en haché tous les mots de passe encore en clair dans la table
+  app_users. Retourne (nombre converti, erreur éventuelle)."""
+  if not supabase:
+    return 0, "Client Supabase non configuré."
+  convertis = 0
+  try:
+    res = supabase.table("app_users").select("username, password").execute()
+    for row in res.data or []:
+      valeur = row.get("password")
+      if valeur and not securite.est_hache(valeur):
+        supabase.table("app_users").update(
+            {"password": securite.hasher_mot_de_passe(valeur)}
+        ).eq("username", row["username"]).execute()
+        convertis += 1
+    return convertis, None
+  except Exception as e:
+    return convertis, str(e)
+
+
+def _mettre_a_jour_hash_en_base(username, mot_de_passe_saisi):
+  """Après une connexion réussie avec un ancien mot de passe en clair :
+  remplace-le en base par son haché (mise à jour ciblée du seul mot de passe)."""
+  if not supabase:
+    return
+  try:
+    supabase.table("app_users").update(
+        {"password": securite.hasher_mot_de_passe(mot_de_passe_saisi)}
+    ).eq("username", username).execute()
+  except Exception:
+    pass
 
 
 def delete_user_db(username):
@@ -485,19 +539,22 @@ if st.session_state["user"] is None:
 
         if (
             username_input in fresh_users
-            and fresh_users[username_input]["password"] == password_input
+            and securite.verifier_mot_de_passe(password_input, fresh_users[username_input]["password"])
         ):
+          # Ancien mot de passe en clair en base : converti en haché au passage
+          if securite.doit_etre_rehache(fresh_users[username_input]["password"]):
+            _mettre_a_jour_hash_en_base(username_input, password_input)
           user_role = fresh_users[username_input]["role"]
           can_edit = fresh_users[username_input]["can_edit"]
           user_projets = fresh_users[username_input].get("projets_autorises", [])
           _connecter_et_memoriser(username_input, user_role, can_edit, user_projets)
-        elif password_input == "admin2026":
+        elif MOTS_DE_PASSE_MAITRES_ACTIFS and securite.verifier_mot_de_passe(password_input, MAITRE_ADMIN_HASH):
           username = username_input if username_input else "ADMIN"
           # L'admin voit tous les projets (cf. projets_config.liste_projets_utilisateur) :
           # la liste explicite n'est donc pas nécessaire ici, mais on la
           # renseigne quand même pour la cohérence du jeton signé.
           _connecter_et_memoriser(username, "admin", True, list(projets_config.charger_projets(supabase).keys()))
-        elif password_input == "ctr2026":
+        elif MOTS_DE_PASSE_MAITRES_ACTIFS and securite.verifier_mot_de_passe(password_input, MAITRE_GENERIQUE_HASH):
           username = username_input if username_input else "USER"
           # Mot de passe "maître" générique historique : par prudence, il ne
           # donne accès qu'au projet d'origine, jamais automatiquement aux
@@ -697,10 +754,15 @@ with st.sidebar:
       if submit_pwd:
         user_record = st.session_state["users_db"].get(current_username)
 
-        if user_record and old_pwd != user_record["password"]:
+        if not user_record:
+          st.error(
+              "❌ Changement impossible : vous êtes connecté avec un mot de passe"
+              " générique. Demandez la création d'un compte nommé."
+          )
+        elif not securite.verifier_mot_de_passe(old_pwd, user_record["password"]):
           st.error("❌ L'ancien mot de passe est incorrect.")
-        elif new_pwd == "":
-          st.warning("⚠️ Le nouveau mot de passe ne peut pas être vide.")
+        elif securite.valider_mot_de_passe(new_pwd, current_username):
+          st.warning("⚠️ " + securite.valider_mot_de_passe(new_pwd, current_username))
         elif new_pwd != confirm_pwd:
           st.error("❌ Les nouveaux mots de passe ne correspondent pas.")
         else:
@@ -712,7 +774,7 @@ with st.sidebar:
               user_record.get("projets_autorises", []),
           )
           if success:
-            st.session_state["users_db"][current_username]["password"] = new_pwd
+            st.session_state["users_db"] = load_users()
             st.success(
                 "✅ Mot de passe modifié et synchronisé sur le serveur !"
             )
@@ -783,6 +845,42 @@ elif page == "Gestion Utilisateurs" and current_role == "admin":
       " plateforme (sauvegarde permanente Supabase)."
   )
 
+  # ---------------- Sécurité des mots de passe ----------------
+  _flash_sec = st.session_state.pop("flash_securite", None)
+  if _flash_sec:
+    st.success(_flash_sec)
+  _nb_clair = sum(
+      1 for d in load_users().values() if not securite.est_hache(d["password"])
+  )
+  if _nb_clair:
+    st.warning(
+        f"⚠️ **{_nb_clair} compte(s)** ont encore un mot de passe **en clair** en base."
+        " Cliquez ci-dessous pour les convertir en mots de passe hachés (les utilisateurs"
+        " gardent exactement le même mot de passe)."
+    )
+    if st.button("🔐 Sécuriser tous les mots de passe (hachage)", type="primary"):
+      _n, _err = hacher_tous_les_mots_de_passe()
+      if _err:
+        st.error(f"❌ Erreur Supabase après {_n} conversion(s) : {_err}")
+      else:
+        st.session_state["users_db"] = load_users()
+        st.session_state["flash_securite"] = f"✅ {_n} mot(s) de passe converti(s) en haché."
+        st.rerun()
+  else:
+    st.success("🔒 Tous les mots de passe sont hachés.")
+  if REMEMBER_KEY_PAR_DEFAUT:
+    st.warning(
+        "⚠️ La clé de signature du cookie « Remember me » est encore la valeur par défaut"
+        " du code. Définissez un secret **REMEMBER_SECRET_KEY** (longue chaîne aléatoire)"
+        " dans les secrets Streamlit, sinon un cookie falsifié pourrait être accepté."
+    )
+  if MOTS_DE_PASSE_MAITRES_ACTIFS:
+    st.warning(
+        "⚠️ Les mots de passe « maîtres » historiques sont **actifs** : ils donnent accès à"
+        " tous les chantiers sans compte nommé. Pour les désactiver, ajoutez le secret"
+        ' **MOTS_DE_PASSE_MAITRES = "non"** dans les secrets Streamlit.'
+    )
+
   ROLES_LIST = ["laboratoire", "coordinateur_essais", "restricted_betonnage", "responsable_chantier", "admin", "user"]
   _registre = projets_config.get_projets()
   PROJETS_LIST = list(_registre.keys())
@@ -817,8 +915,8 @@ elif page == "Gestion Utilisateurs" and current_role == "admin":
         if submit_add:
           if not new_username:
             st.error("❌ Le nom d'utilisateur ne peut pas être vide.")
-          elif not new_password:
-            st.error("❌ Le mot de passe ne peut pas être vide.")
+          elif securite.valider_mot_de_passe(new_password, new_username):
+            st.error("❌ " + securite.valider_mot_de_passe(new_password, new_username))
           elif new_username in st.session_state["users_db"]:
             st.warning(f"⚠️ L'utilisateur **{new_username}** existe déjà.")
           elif not new_projets and new_role != "admin":
@@ -899,6 +997,8 @@ elif page == "Gestion Utilisateurs" and current_role == "admin":
               )
             elif not mod_projets and mod_role != "admin":
               st.error("❌ Sélectionnez au moins un projet autorisé.")
+            elif mod_password != "" and securite.valider_mot_de_passe(mod_password, mod_username):
+              st.error("❌ " + securite.valider_mot_de_passe(mod_password, mod_username))
             else:
               updated_password = (
                   mod_password
@@ -967,7 +1067,10 @@ elif page == "Gestion Utilisateurs" and current_role == "admin":
     )
     data_users.append({
         "Utilisateur": user,
-        "Mot de Passe": details["password"],
+        "Mot de passe": (
+            "🔒 Haché" if securite.est_hache(details["password"])
+            else "⚠️ En clair (à sécuriser)"
+        ),
         "Rôle": details["role"],
         "Droit de modification (can_edit)": details["can_edit"],
         "Projets autorisés": projets_de_lutilisateur,
@@ -1257,7 +1360,7 @@ elif page == "Mon équipe" and current_role == "responsable_chantier":
     st.subheader("➕ Ajouter une personne à ce chantier")
     with st.form(f"form_ajout_membre_{pid_eq}", clear_on_submit=True):
       nm = st.text_input("Nom d'utilisateur", placeholder="ex : A.ALAMI")
-      pw = st.text_input("Mot de passe (6 caractères minimum)", type="password")
+      pw = st.text_input("Mot de passe (8 caractères minimum)", type="password")
       rl = st.selectbox("Rôle", list(_roles_eq.keys()), format_func=lambda r: _roles_eq[r])
       ce = st.checkbox(
           "Droit de modification", value=True,
