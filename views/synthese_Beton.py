@@ -858,51 +858,27 @@ def generate_excel_synthesis_betonnage(
       )
 
   row_idx += 3
-  ws.merge_cells(
-      start_row=row_idx,
-      start_column=1,
-      end_row=row_idx,
-      end_column=mid_col_idx,
-  )
-  cell_resp = ws.cell(row=row_idx, column=1, value="Responsable d'essai :")
-  cell_resp.font = font_bold
-  cell_resp.alignment = Alignment(horizontal="center", vertical="center")
-
-  ws.merge_cells(
-      start_row=row_idx,
-      start_column=mid_col_idx + 1,
-      end_row=row_idx,
-      end_column=nb_cols,
-  )
-  cell_chef = ws.cell(
-      row=row_idx, column=mid_col_idx + 1, value="Chef du laboratoire :"
-  )
-  cell_chef.font = font_bold
-  cell_chef.alignment = Alignment(horizontal="center", vertical="center")
-
+  # Cases de visa : signataires propres au chantier, réparties sur toute la largeur
+  visas_s = projets_config.visas_pv()
+  n_v = len(visas_s)
+  largeur_v = max(nb_cols // n_v, 1)
+  plages_v = [
+      (i_v * largeur_v + 1, nb_cols if i_v == n_v - 1 else (i_v + 1) * largeur_v)
+      for i_v in range(n_v)
+  ]
+  for (titre_v, _nom_v), (c_deb, c_fin) in zip(visas_s, plages_v):
+    ws.merge_cells(start_row=row_idx, start_column=c_deb, end_row=row_idx, end_column=c_fin)
+    cell_t = ws.cell(row=row_idx, column=c_deb, value=titre_v.replace("Visa ", "", 1) + " :")
+    cell_t.font = font_bold
+    cell_t.alignment = Alignment(horizontal="center", vertical="center")
   ws.row_dimensions[row_idx].height = 20
   row_idx += 1
 
-  ws.merge_cells(
-      start_row=row_idx,
-      start_column=1,
-      end_row=row_idx,
-      end_column=mid_col_idx,
-  )
-  cell_nam_resp = ws.cell(row=row_idx, column=1, value="O.IKKEN")
-  cell_nam_resp.font = Font(name="Calibri", size=11, bold=True, color="1F4E79")
-  cell_nam_resp.alignment = Alignment(horizontal="center", vertical="center")
-
-  ws.merge_cells(
-      start_row=row_idx,
-      start_column=mid_col_idx + 1,
-      end_row=row_idx,
-      end_column=nb_cols,
-  )
-  cell_nam_chef = ws.cell(row=row_idx, column=mid_col_idx + 1, value="H.BAALLAL")
-  cell_nam_chef.font = Font(name="Calibri", size=11, bold=True, color="1F4E79")
-  cell_nam_chef.alignment = Alignment(horizontal="center", vertical="center")
-
+  for (_titre_v, nom_v), (c_deb, c_fin) in zip(visas_s, plages_v):
+    ws.merge_cells(start_row=row_idx, start_column=c_deb, end_row=row_idx, end_column=c_fin)
+    cell_n = ws.cell(row=row_idx, column=c_deb, value=nom_v)
+    cell_n.font = Font(name="Calibri", size=11, bold=True, color="1F4E79")
+    cell_n.alignment = Alignment(horizontal="center", vertical="center")
   ws.row_dimensions[row_idx].height = 20
 
   ws.column_dimensions["A"].width = 14
@@ -1231,51 +1207,27 @@ def generate_excel_synthesis_controle(df_data, titre_periode):
     row_idx += 1
 
   row_idx += 2
-  ws.merge_cells(
-      start_row=row_idx,
-      start_column=1,
-      end_row=row_idx,
-      end_column=mid_col_idx,
-  )
-  cell_resp = ws.cell(row=row_idx, column=1, value="Responsable d'essai :")
-  cell_resp.font = font_bold
-  cell_resp.alignment = Alignment(horizontal="center", vertical="center")
-
-  ws.merge_cells(
-      start_row=row_idx,
-      start_column=mid_col_idx + 1,
-      end_row=row_idx,
-      end_column=nb_cols,
-  )
-  cell_chef = ws.cell(
-      row=row_idx, column=mid_col_idx + 1, value="Chef du laboratoire :"
-  )
-  cell_chef.font = font_bold
-  cell_chef.alignment = Alignment(horizontal="center", vertical="center")
-
+  # Cases de visa : signataires propres au chantier, réparties sur toute la largeur
+  visas_s = projets_config.visas_pv()
+  n_v = len(visas_s)
+  largeur_v = max(nb_cols // n_v, 1)
+  plages_v = [
+      (i_v * largeur_v + 1, nb_cols if i_v == n_v - 1 else (i_v + 1) * largeur_v)
+      for i_v in range(n_v)
+  ]
+  for (titre_v, _nom_v), (c_deb, c_fin) in zip(visas_s, plages_v):
+    ws.merge_cells(start_row=row_idx, start_column=c_deb, end_row=row_idx, end_column=c_fin)
+    cell_t = ws.cell(row=row_idx, column=c_deb, value=titre_v.replace("Visa ", "", 1) + " :")
+    cell_t.font = font_bold
+    cell_t.alignment = Alignment(horizontal="center", vertical="center")
   ws.row_dimensions[row_idx].height = 20
   row_idx += 1
 
-  ws.merge_cells(
-      start_row=row_idx,
-      start_column=1,
-      end_row=row_idx,
-      end_column=mid_col_idx,
-  )
-  cell_nam_resp = ws.cell(row=row_idx, column=1, value="O.IKKEN")
-  cell_nam_resp.font = Font(name="Calibri", size=11, bold=True, color="1F4E79")
-  cell_nam_resp.alignment = Alignment(horizontal="center", vertical="center")
-
-  ws.merge_cells(
-      start_row=row_idx,
-      start_column=mid_col_idx + 1,
-      end_row=row_idx,
-      end_column=nb_cols,
-  )
-  cell_nam_chef = ws.cell(row=row_idx, column=mid_col_idx + 1, value="H.BAALLAL")
-  cell_nam_chef.font = Font(name="Calibri", size=11, bold=True, color="1F4E79")
-  cell_nam_chef.alignment = Alignment(horizontal="center", vertical="center")
-
+  for (_titre_v, nom_v), (c_deb, c_fin) in zip(visas_s, plages_v):
+    ws.merge_cells(start_row=row_idx, start_column=c_deb, end_row=row_idx, end_column=c_fin)
+    cell_n = ws.cell(row=row_idx, column=c_deb, value=nom_v)
+    cell_n.font = Font(name="Calibri", size=11, bold=True, color="1F4E79")
+    cell_n.alignment = Alignment(horizontal="center", vertical="center")
   ws.row_dimensions[row_idx].height = 20
 
   ws.column_dimensions["A"].width = 14
