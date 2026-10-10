@@ -1,5 +1,5 @@
 """
-Scan de bon de livraison (BL) de béton par l'API Google Gemini (Gratuit).
+Scan de bon de livraison (BL) de béton par un modèle de vision OpenAI.
 
 L'agent photographie (ou importe) le BL ; l'image est réduite, envoyée au
 modèle, qui renvoie les champs lus au format JSON. Les valeurs sont VALIDÉES
@@ -9,12 +9,14 @@ vérifier et d'enregistrer lui-même.
 Sécurité :
 - la clé API reste dans les secrets Streamlit (jamais dans le code ni côté navigateur) ;
 - la réponse du modèle est traitée comme une donnée non fiable : seuls les champs
-  attendus sont gardés, typés, bornés et nettoyés ;
+  attendus sont gardés, typés, bornés et nettoyés (un texte écrit sur le papier
+  ne peut donc ni donner d'ordre à l'application, ni injecter du code) ;
 - l'image n'est pas conservée par l'application.
 
 Secrets Streamlit reconnus :
-    GEMINI_API_KEY                (obligatoire)
-    GEMINI_MODEL_SCAN             (facultatif, défaut : gemini-2.5-flash)
+    OPENAI_API_KEY                (obligatoire ; ou [openai] API_KEY = "...")
+    OPENAI_MODEL_SCAN             (facultatif, défaut : gpt-4o-mini)
+    OPENAI_MODEL_SCAN_RENFORCE    (facultatif, défaut : gpt-4o)
 """
 
 import base64
@@ -25,7 +27,8 @@ from datetime import date, datetime, time, timedelta
 
 import streamlit as st
 
-MODELE_DEFAUT = "gemini-2.5-flash"
+MODELE_RAPIDE_DEFAUT = "gpt-4o-mini"
+MODELE_RENFORCE_DEFAUT = "gpt-4o"
 CLASSES_BETON = ["C25/30", "C30/37", "C35/45", "C40/50", "C45/55"]
 TAILLE_MAX_IMAGE_OCTETS = 20 * 1024 * 1024
 COTE_MAX_PIXELS = 2048
@@ -50,53 +53,61 @@ class ScanBLError(Exception):
 
 
 # ==============================================================================
-# 1. REQUÊTE AU MODÈLE GEMINI
+# 1. REQUÊTE AU MODÈLE
 # ==============================================================================
-SCHEMA_BL_JSON = {
-    "type": "OBJECT",
-    "properties": {
-        "est_un_bon_de_livraison": {
-            "type": "BOOLEAN",
-            "description": "false si l'image n'est pas un bon de livraison de béton.",
+_NULLABLE_STR = {"type": ["string", "null"]}
+_NULLABLE_NUM = {"type": ["number", "null"]}
+
+SCHEMA_BL = {
+    "name": "bon_livraison_beton",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "properties": {
+            "est_un_bon_de_livraison": {
+                "type": "boolean",
+                "description": "false si l'image n'est pas un bon de livraison de béton.",
+            },
+            "lisibilite": {"type": "string", "enum": ["bonne", "moyenne", "mauvaise"]},
+            "numero_bl": {**_NULLABLE_STR, "description": "Numéro du bon de livraison (N° BL / Bon n°)."},
+            "date_livraison": {
+                **_NULLABLE_STR,
+                "description": "Date de livraison au format AAAA-MM-JJ. Les dates du document sont jour/mois/année.",
+            },
+            "centrale_beton": {**_NULLABLE_STR, "description": "Nom de la centrale à béton / du fournisseur."},
+            "client": {**_NULLABLE_STR, "description": "Nom du client tel qu'imprimé sur le BL."},
+            "chantier": {**_NULLABLE_STR, "description": "Nom du chantier / projet tel qu'imprimé sur le BL."},
+            "ouvrage": {
+                **_NULLABLE_STR,
+                "description": "Partie d'ouvrage à bétonner (voile, semelle, dalle, poteau...).",
+            },
+            "classe_beton": {**_NULLABLE_STR, "description": "Classe de résistance, par exemple C25/30."},
+            "quantite_m3": {**_NULLABLE_NUM, "description": "Volume livré en m³ (nombre décimal avec un point)."},
+            "heure_depart_centrale": {
+                **_NULLABLE_STR,
+                "description": "Heure de fin de chargement / de départ de la centrale, HH:MM (24 h).",
+            },
+            "heure_arrivee_chantier": {
+                **_NULLABLE_STR,
+                "description": "Heure d'arrivée au chantier, HH:MM (24 h), si elle figure sur le BL.",
+            },
+            "affaissement_mm": {
+                **_NULLABLE_NUM,
+                "description": "Affaissement au cône d'Abrams en millimètres, UNIQUEMENT s'il est écrit en chiffres.",
+            },
+            "remarques": {
+                **_NULLABLE_STR,
+                "description": "Information utile non couverte ailleurs (immatriculation du camion, formule...). Court.",
+            },
         },
-        "lisibilite": {"type": "STRING", "enum": ["bonne", "moyenne", "mauvaise"]},
-        "numero_bl": {"type": ["STRING", "NULL"], "description": "Numéro du bon de livraison (N° BL / Bon n°)."},
-        "date_livraison": {
-            "type": ["STRING", "NULL"],
-            "description": "Date de livraison au format AAAA-MM-JJ. Les dates du document sont jour/mois/année.",
-        },
-        "centrale_beton": {"type": ["STRING", "NULL"], "description": "Nom de la centrale à béton / du fournisseur."},
-        "client": {"type": ["STRING", "NULL"], "description": "Nom du client tel qu'imprimé sur le BL."},
-        "chantier": {"type": ["STRING", "NULL"], "description": "Nom du chantier / projet tel qu'imprimé sur le BL."},
-        "ouvrage": {
-            "type": ["STRING", "NULL"],
-            "description": "Partie d'ouvrage à bétonner (voile, semelle, dalle, poteau...).",
-        },
-        "classe_beton": {"type": ["STRING", "NULL"], "description": "Classe de résistance, par exemple C25/30."},
-        "quantite_m3": {"type": ["NUMBER", "NULL"], "description": "Volume livré en m³ (nombre décimal avec un point)."},
-        "heure_depart_centrale": {
-            "type": ["STRING", "NULL"],
-            "description": "Heure de fin de chargement / de départ de la centrale, HH:MM (24 h).",
-        },
-        "heure_arrivee_chantier": {
-            "type": ["STRING", "NULL"],
-            "description": "Heure d'arrivée au chantier, HH:MM (24 h), si elle figure sur le BL.",
-        },
-        "affaissement_mm": {
-            "type": ["NUMBER", "NULL"],
-            "description": "Affaissement au cône d'Abrams en millimètres, UNIQUEMENT s'il est écrit en chiffres.",
-        },
-        "remarques": {
-            "type": ["STRING", "NULL"],
-            "description": "Information utile non couverte ailleurs (immatriculation du camion, formule...). Court.",
-        },
+        "required": [
+            "est_un_bon_de_livraison", "lisibilite", "numero_bl", "date_livraison",
+            "centrale_beton", "client", "chantier", "ouvrage", "classe_beton",
+            "quantite_m3", "heure_depart_centrale", "heure_arrivee_chantier",
+            "affaissement_mm", "remarques",
+        ],
+        "additionalProperties": False,
     },
-    "required": [
-        "est_un_bon_de_livraison", "lisibilite", "numero_bl", "date_livraison",
-        "centrale_beton", "client", "chantier", "ouvrage", "classe_beton",
-        "quantite_m3", "heure_depart_centrale", "heure_arrivee_chantier",
-        "affaissement_mm", "remarques",
-    ],
 }
 
 CONSIGNES = (
@@ -114,19 +125,6 @@ CONSIGNES = (
 )
 
 
-def _cle_gemini():
-    """Clé API Google depuis les secrets Streamlit."""
-    try:
-        racine = dict(st.secrets)
-    except Exception:
-        racine = {}
-
-    for nom, valeur in racine.items():
-        if str(nom).lower() in ("gemini_api_key", "google_api_key") and isinstance(valeur, str) and valeur.strip():
-            return valeur.strip()
-    return None
-
-
 def _secret(nom, defaut=None):
     try:
         valeur = st.secrets.get(nom)
@@ -135,8 +133,36 @@ def _secret(nom, defaut=None):
     return valeur if valeur not in (None, "") else defaut
 
 
+def _cle_openai():
+    """Clé API depuis les secrets Streamlit. Plusieurs écritures sont acceptées,
+    sans tenir compte des majuscules/minuscules :
+        OPENAI_API_KEY = "sk-..."          (à la racine)
+        [openai]  API_KEY = "sk-..."       (dans un bloc, aussi api_key / key)
+    """
+    try:
+        racine = dict(st.secrets)
+    except Exception:
+        racine = {}
+
+    # 1. clé à la racine
+    for nom, valeur in racine.items():
+        if str(nom).lower() in ("openai_api_key", "openai_key") and isinstance(valeur, str) and valeur.strip():
+            return valeur.strip()
+
+    # 2. clé dans un bloc [openai]
+    for nom, bloc in racine.items():
+        if str(nom).lower() == "openai" and hasattr(bloc, "items"):
+            for sous_nom, valeur in bloc.items():
+                if (str(sous_nom).lower() in ("api_key", "apikey", "key", "openai_api_key")
+                        and isinstance(valeur, str) and valeur.strip()):
+                    return valeur.strip()
+    return None
+
+
 def preparer_image(donnees):
-    """Redresse (EXIF), réduit à 2048 px max et recompresse en JPEG."""
+    """Redresse (EXIF), réduit à 2048 px max et recompresse en JPEG : une photo
+    de smartphone (5 à 12 Mo) devient ~300 Ko, donc plus rapide et moins chère,
+    sans perdre la lisibilité du texte. Retourne les octets JPEG."""
     if not donnees:
         raise ScanBLError("Aucune image reçue.")
     if len(donnees) > TAILLE_MAX_IMAGE_OCTETS:
@@ -163,47 +189,72 @@ def preparer_image(donnees):
         raise ScanBLError("Image illisible. Utilisez une photo au format JPG, PNG ou WebP.")
 
 
+def _appeler_modele(client, modele, messages, openai_mod):
+    """Appel en mode « JSON structuré strict », avec repli si le modèle ne
+    supporte pas un des paramètres (JSON strict, température)."""
+    essais = [
+        {"temperature": 0, "response_format": {"type": "json_schema", "json_schema": SCHEMA_BL}},
+        {"response_format": {"type": "json_schema", "json_schema": SCHEMA_BL}},
+        {"response_format": {"type": "json_object"}},
+    ]
+    derniere = None
+    for options in essais:
+        try:
+            reponse = client.chat.completions.create(model=modele, messages=messages, **options)
+            return reponse.choices[0].message.content
+        except openai_mod.BadRequestError as e:  # paramètre non supporté : on essaie plus simple
+            derniere = e
+            continue
+    raise derniere
+
+
 def analyser_bon_livraison(donnees_image, modele_renforce=False):
-    """Envoie l'image au modèle Gemini et retourne le résultat VALIDÉ."""
-    cle = _cle_gemini()
+    """Envoie l'image au modèle de vision et retourne le résultat VALIDÉ
+    (voir normaliser_resultat). Lève ScanBLError avec un message clair."""
+    cle = _cle_openai()
     if not cle:
         raise ScanBLError(
-            "Clé Google Gemini introuvable. Ajoutez le secret GEMINI_API_KEY dans les secrets Streamlit."
+            "Clé OpenAI introuvable. Ajoutez le secret OPENAI_API_KEY dans les secrets Streamlit."
         )
     try:
-        from google import genai
-        from google.genai import types
+        import openai
     except ImportError:
-        raise ScanBLError("Le paquet « google-genai » n'est pas installé : ajoutez google-genai à requirements.txt.")
+        raise ScanBLError("Le paquet « openai » n'est pas installé : ajoutez openai>=1.0.0 à requirements.txt.")
 
     jpeg = preparer_image(donnees_image)
-    modele = _secret("GEMINI_MODEL_SCAN", MODELE_DEFAUT)
+    url = "data:image/jpeg;base64," + base64.b64encode(jpeg).decode("ascii")
+    if modele_renforce:
+        modele = _secret("OPENAI_MODEL_SCAN_RENFORCE", MODELE_RENFORCE_DEFAUT)
+    else:
+        modele = _secret("OPENAI_MODEL_SCAN", MODELE_RAPIDE_DEFAUT)
 
+    messages = [
+        {"role": "system", "content": CONSIGNES + "\nRéponds uniquement en JSON, selon le schéma imposé."},
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Lis ce bon de livraison de béton et renseigne tous les champs."},
+                {"type": "image_url", "image_url": {"url": url, "detail": "high"}},
+            ],
+        },
+    ]
     try:
-        client = genai.Client(api_key=cle)
-        part_image = types.Part.from_bytes(data=jpeg, mime_type="image/jpeg")
-        
-        config = types.GenerateContentConfig(
-            system_instruction=CONSIGNES,
-            response_mime_type="application/json",
-            response_schema=SCHEMA_BL_JSON,
-            temperature=0,
-        )
-
-        reponse = client.models.generate_content(
-            model=modele,
-            contents=[part_image, "Lis ce bon de livraison de béton et renseigne tous les champs."],
-            config=config,
-        )
-        contenu = reponse.text
-    except Exception as e:
-        err_msg = str(e).lower()
-        if "api_key" in err_msg or "auth" in err_msg or "invalid argument" in err_msg:
-            raise ScanBLError("Clé Google Gemini refusée : vérifiez la valeur du secret GEMINI_API_KEY.")
-        elif "quota" in err_msg or "resource_exhausted" in err_msg:
-            raise ScanBLError("Limite Google Gemini atteinte (quota gratuit épuisé).")
-        else:
-            raise ScanBLError(f"Erreur du service Gemini : {e}")
+        client = openai.OpenAI(api_key=cle, timeout=60, max_retries=2)
+        contenu = _appeler_modele(client, modele, messages, openai)
+    except openai.AuthenticationError:
+        raise ScanBLError("Clé OpenAI refusée : vérifiez la valeur du secret OPENAI_API_KEY.")
+    except openai.RateLimitError:
+        raise ScanBLError("Limite OpenAI atteinte (quota ou crédit épuisé). Vérifiez le compte OpenAI.")
+    except openai.NotFoundError:
+        raise ScanBLError(f"Modèle « {modele} » introuvable ou non autorisé pour cette clé.")
+    except openai.APITimeoutError:
+        raise ScanBLError("Le service OpenAI a mis trop de temps à répondre. Réessayez.")
+    except openai.APIConnectionError:
+        raise ScanBLError("Connexion à OpenAI impossible. Vérifiez le réseau puis réessayez.")
+    except openai.BadRequestError:
+        raise ScanBLError("Requête refusée par OpenAI (image ou paramètres non acceptés).")
+    except openai.APIError:
+        raise ScanBLError("Erreur du service OpenAI. Réessayez dans un instant.")
 
     try:
         brut = json.loads(contenu)
@@ -211,14 +262,13 @@ def analyser_bon_livraison(donnees_image, modele_renforce=False):
             raise ValueError
     except Exception:
         raise ScanBLError("La réponse de l'IA est illisible. Reprenez la photo plus nette et réessayez.")
-    
     resultat = normaliser_resultat(brut)
     resultat["modele"] = modele
     return resultat
 
 
 # ==============================================================================
-# 2. VALIDATION DE LA RÉPONSE
+# 2. VALIDATION DE LA RÉPONSE (la réponse du modèle n'est JAMAIS crue telle quelle)
 # ==============================================================================
 def _texte(valeur, longueur_max):
     if valeur is None or isinstance(valeur, (dict, list, bool)):
@@ -237,12 +287,13 @@ def _nombre(valeur, minimum, maximum):
         nombre = float(valeur)
     except (TypeError, ValueError):
         return None
-    if nombre != nombre or not (minimum <= nombre <= maximum):
+    if nombre != nombre or not (minimum <= nombre <= maximum):  # NaN ou hors bornes
         return None
     return nombre
 
 
 def _heure(valeur):
+    """'8h30', '08:30', '8:30:15', '08.30', '8H' -> datetime.time ; sinon None."""
     txt = _texte(valeur, 20)
     if not txt:
         return None
@@ -268,6 +319,7 @@ def _date(valeur):
 
 
 def _classe(valeur):
+    """'C 25/30', 'c25-30', 'C25/30 XC2' -> 'C25/30' si elle figure dans la liste."""
     txt = _texte(valeur, 40)
     if not txt:
         return None, None
@@ -281,6 +333,7 @@ def _classe(valeur):
 
 
 def _md(txt):
+    """Neutralise le markdown dans un texte venant de l'IA avant affichage."""
     return re.sub(r"([\\`*_\[\]<>|#])", r"\\\1", str(txt))
 
 
@@ -289,6 +342,10 @@ def _normaliser_nom(txt):
 
 
 def normaliser_resultat(brut, aujourdhui=None):
+    """Transforme la réponse brute du modèle en :
+    {"est_bl", "valeurs": {clé_widget: valeur typée}, "lus": {clé_résultat: valeur},
+     "avertissements": [...], "infos": {...}}.
+    Tout champ invalide, hors bornes ou non attendu est ignoré."""
     aujourdhui = aujourdhui or date.today()
     avert, valeurs, lus = [], {}, {}
 
@@ -337,6 +394,7 @@ def normaliser_resultat(brut, aujourdhui=None):
     if aff is not None:
         lus["affaissement_mm"] = int(round(aff))
 
+    # Cohérence : l'arrivée doit suivre le départ (en tolérant le passage de minuit)
     h1, h2 = lus.get("heure_depart_centrale"), lus.get("heure_arrivee_chantier")
     if h1 and h2:
         duree = (h2.hour * 60 + h2.minute) - (h1.hour * 60 + h1.minute)
@@ -361,7 +419,148 @@ def normaliser_resultat(brut, aujourdhui=None):
 
 
 def controles_contexte(resultat, client_projet="", nom_projet=""):
+    """Avertissements liés au chantier ACTIF (le client lu sur le BL doit
+    correspondre au client du chantier actif)."""
     avert = []
     client_bl = (resultat.get("infos") or {}).get("client")
     if client_bl and client_projet and client_projet != "-":
-        a, b = _
+        a, b = _normaliser_nom(client_bl), _normaliser_nom(client_projet)
+        if a and b and a not in b and b not in a:
+            avert.append(
+                f"Le client lu sur le BL ({_md(client_bl)}) diffère du client du chantier actif "
+                f"« {_md(nom_projet)} » ({_md(client_projet)}) : êtes-vous sur le bon chantier ?"
+            )
+    return avert
+
+
+# ==============================================================================
+# 3. COMPOSANT D'INTERFACE
+# ==============================================================================
+def appliquer_scan_en_attente():
+    """À appeler au tout début de la vue, AVANT la création des champs du
+    formulaire : Streamlit n'autorise la modification de la valeur d'un champ
+    qu'avant son affichage."""
+    en_attente = st.session_state.pop("_scan_bl_a_appliquer", None)
+    if en_attente:
+        for cle_widget, valeur in en_attente.items():
+            st.session_state[cle_widget] = valeur
+
+
+def _format_valeur(valeur):
+    if isinstance(valeur, datetime):
+        return valeur.strftime("%d/%m/%Y %H:%M")
+    if isinstance(valeur, date):
+        return valeur.strftime("%d/%m/%Y")
+    if isinstance(valeur, time):
+        return valeur.strftime("%H:%M")
+    return str(valeur)
+
+
+def afficher_scan_bl(supabase=None, projet_id=None, client_projet="", nom_projet=""):
+    """Zone « Scanner le bon de livraison » : photo ou import, analyse par l'IA,
+    contrôle des valeurs lues, puis application au formulaire."""
+    n = st.session_state.get("_scan_bl_n", 0)  # change pour vider les champs d'image
+
+    try:
+        cadre = st.container(border=True)
+    except TypeError:  # anciennes versions de Streamlit sans l'option « border »
+        cadre = st.container()
+
+    with cadre:
+        st.markdown("#### 📷 Scanner le bon de livraison")
+        st.caption(
+            "Prenez en photo ou importez le BL : l'IA lit les informations et pré-remplit le "
+            "formulaire ci-dessous. **Vérifiez toujours les valeurs avant d'enregistrer.** "
+            "La photo est envoyée à OpenAI pour analyse et n'est pas conservée par l'application."
+        )
+
+        message = st.session_state.pop("_scan_bl_message", None)
+        if message:
+            st.success(message)
+
+        if not _cle_openai():
+            st.error("Le scan est indisponible : secret **OPENAI_API_KEY** introuvable dans les secrets Streamlit.")
+            return
+
+        mode = st.radio(
+            "Source de l'image",
+            ["📸 Prendre une photo", "🖼️ Importer une image"],
+            horizontal=True, label_visibility="collapsed", key=f"scan_bl_mode_{n}",
+        )
+        if mode.startswith("📸"):
+            image = st.camera_input("Photographiez le bon de livraison (texte bien lisible, à plat)", key=f"scan_bl_cam_{n}")
+        else:
+            image = st.file_uploader(
+                "Importez la photo du bon de livraison (sur téléphone : choisissez « Appareil photo »)",
+                type=["jpg", "jpeg", "png", "webp"], key=f"scan_bl_up_{n}",
+            )
+            if image is not None:
+                st.image(image, width=260)
+
+        renforce = st.checkbox(
+            "Photo difficile ou écriture manuscrite : lecture renforcée (plus lente, plus précise)",
+            key=f"scan_bl_renf_{n}",
+        )
+
+        if st.button("🔍 Analyser le bon de livraison", disabled=image is None, key=f"scan_bl_go_{n}"):
+            if st.session_state.get("_scan_bl_compteur", 0) >= MAX_SCANS_PAR_SESSION:
+                st.error("Nombre maximal d'analyses atteint pour cette session. Rechargez la page.")
+            else:
+                st.session_state["_scan_bl_compteur"] = st.session_state.get("_scan_bl_compteur", 0) + 1
+                try:
+                    with st.spinner("Lecture du bon de livraison en cours…"):
+                        resultat = analyser_bon_livraison(image.getvalue(), modele_renforce=renforce)
+                    resultat["avertissements"] = resultat["avertissements"] + controles_contexte(
+                        resultat, client_projet, nom_projet
+                    )
+                    bl = resultat["lus"].get("numero_bl")
+                    if bl and supabase is not None and projet_id:
+                        try:
+                            deja = supabase.table("suivi_betonnage").select("id").eq("bl_num", bl).eq("projet_id", projet_id).execute()
+                            if deja.data:
+                                resultat["avertissements"].append(
+                                    f"Le N° BL {_md(bl)} est déjà enregistré dans ce chantier (doublon refusé à l'enregistrement)."
+                                )
+                        except Exception:
+                            pass
+                    st.session_state["_scan_bl_resultat"] = resultat
+                except ScanBLError as e:
+                    st.session_state.pop("_scan_bl_resultat", None)
+                    st.error(str(e))
+
+        resultat = st.session_state.get("_scan_bl_resultat")
+        if not resultat:
+            return
+
+        if not resultat["est_bl"]:
+            st.warning("Cette image ne ressemble pas à un bon de livraison de béton. Reprenez la photo.")
+            return
+
+        st.markdown("**Valeurs lues sur le bon de livraison**")
+        lignes = [
+            {"Champ": libelle, "Valeur lue": _format_valeur(resultat["lus"][cle]) if cle in resultat["lus"] else "— non lu —"}
+            for cle, _, libelle in CHAMPS_APPLIQUES
+        ]
+        st.dataframe(lignes, hide_index=True, use_container_width=True)
+        for a in resultat["avertissements"]:
+            st.warning(a)
+        remarques = resultat["infos"].get("remarques")
+        if remarques:
+            st.text(f"Autre information lue : {remarques}")
+        st.caption(f"Modèle : {resultat.get('modele', '?')} · Lisibilité estimée : {resultat['infos'].get('lisibilite')}")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("✅ Appliquer au formulaire", type="primary", disabled=not resultat["valeurs"], key=f"scan_bl_ok_{n}"):
+                st.session_state["_scan_bl_a_appliquer"] = dict(resultat["valeurs"])
+                st.session_state["_scan_bl_message"] = (
+                    f"✅ {len(resultat['valeurs'])} champ(s) pré-rempli(s). Vérifiez-les puis enregistrez."
+                )
+                st.session_state.pop("_scan_bl_resultat", None)
+                st.session_state["_scan_bl_n"] = n + 1
+                st.rerun()
+        with c2:
+            if st.button("🗑️ Annuler", key=f"scan_bl_no_{n}"):
+                st.session_state.pop("_scan_bl_resultat", None)
+                st.session_state["_scan_bl_n"] = n + 1
+                st.rerun()
